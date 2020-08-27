@@ -45,3 +45,26 @@ issue. The error, if it occurs, also does not indicate in any way that it is
 compiler related. A way to solve this issue is to note the current version of
 the nightly compiler before upgrading, reverting if the upgraded compiler should
 fail to compile the code.
+
+- modifying state requires payment
+
+All calls to runtime modules must go through rpc functions, which have a weight.
+Based on the weight, a runtime cost is computed which must be paid by the caller.
+This gives economic protection for the chain, as to avoid spamming garbage. As
+mentioned previously, any valid looking call is included in the chain, regardless
+of whether or not the call is actually successful. This does mean that it will
+be hard for nodes to directly push their result, since they would need a funded
+account. Some workarounds could be:
+
+	- make certain calls free. This mimics the current case where the explorer
+  just accepts any calls, though the explorer will not actually consume any for
+  bogus calls.
+
+	- we can automatically set up a wallet for a node. This is not ideal since
+  it means the farmer then needs to add some funds to the wallet, which is a
+  manual step which might go wrong.
+
+	- there is some talk about a `proxy` pallet, which would allow an account to
+  make certain calls on behalf of someone else. We need to check if this is
+  a good solution, and if it makes the call free for the caller (and offloads
+  the costs to the authorized person).
