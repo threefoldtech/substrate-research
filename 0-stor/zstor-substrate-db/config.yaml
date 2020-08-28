@@ -1,0 +1,30 @@
+namespace: test  # 0-db namespace (required)
+datastor: # required
+  # the address(es) of a 0-db cluster (required0)
+  shards: # required
+    - address: 127.0.0.1:12345
+    - address: 127.0.0.1:12346
+    - address: 127.0.0.1:12347
+    - address: 127.0.0.1:12348
+  pipeline:
+    block_size: 4096
+    compression: # optional, snappy by default
+      type: snappy # snappy is the default, other options: lz4, gzip
+      mode: default # default is the default, other options: best_speed, best_compression
+    encryption: # optional, disabled by default
+      type: aes # aes is the default and only standard option
+      private_key: ab345678901234567890123456789012
+    distribution: # optional, disabled by default
+      data_shards: 3
+      parity_shards: 1
+metastor: # optional section
+      #   db:
+      #     type: badger # required
+      #     config: # config specific to metastor type
+      #       # the address(es) of an etcd server cluster
+      #       datadir: "./data"
+      #       metadir: "./meta"
+  encoding: protobuf # protobuf is the default and only standard option -> Not optional
+  # encryption:
+  #   type: aes # aes is the default and only standard option
+  #   private_key: ab345678901234567890123456789012

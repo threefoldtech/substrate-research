@@ -96,7 +96,7 @@ func getMetaClient() (*metastor.Client, error) {
 	// if err != nil {
 	// 	return nil, err
 	// }
-	database := &sdb.Substrate{}
+	database := sdb.New()
 	config.Database = database
 
 	// create the metadata encoding func pair
