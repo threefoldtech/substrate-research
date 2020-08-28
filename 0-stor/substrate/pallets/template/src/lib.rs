@@ -50,8 +50,10 @@ decl_event!(
     where
         AccountId = <T as system::Trait>::AccountId,
     {
-        /// New metadata was inserted in a namespace. [key, who]
+        /// New metadata was inserted in a namespace. [who, key]
         MetadataCreated(AccountId, Vec<u8>),
+        /// Metadata was removed in a namespace. [who, key]
+        MetadataRemoved(AccountId, Vec<u8>),
     }
 );
 
@@ -61,6 +63,8 @@ decl_error! {
         /// Tried to insert metadata in a namespace with a key which already exists in said
         /// namespace.
         MetadataExists,
+        /// Tried to delete metadata in a namespace without being the owner of it
+        NoPermissions,
     }
 }
 
@@ -85,11 +89,7 @@ decl_module! {
         pub fn set_metadata(origin, namespace: Vec<u8>, key: Vec<u8>, metadata: Vec<u8>) -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
 
-            // construct key
-            let namespace_hash = &namespace.blake2_128();
-            let mut hashed_key: Vec<u8>= namespace_hash[..].into();
-            hashed_key.extend_from_slice(&key);
-            // hashed_key is now namespace_hash + raw key bytes
+            let hashed_key = contruct_hashkey(&namespace, &key);
 
             // Makse sure this is not an update, there is a separate function for that
             ensure!(!MetaStor::<T>::contains_key(&hashed_key), Error::<T>::MetadataExists);
@@ -100,5 +100,35 @@ decl_module! {
 
             Ok(())
         }
+
+        #[weight = 10_000] // TODO
+        pub fn delete_metadata(origin, namespace: Vec<u8>, key: Vec<u8>) -> dispatch::DispatchResult {
+            let sender = ensure_signed(origin)?;
+
+            let hashed_key = contruct_hashkey(&namespace, &key);
+
+            // Makse sure the key exists
+            ensure!(MetaStor::<T>::contains_key(&hashed_key), Error::<T>::MetadataExists);
+
+            let (_, owner) = MetaStor::<T>::get(&hashed_key);
+
+            // Make sure the owner and sender are the same person
+            ensure!(owner == sender, Error::<T>::NoPermissions);
+
+            MetaStor::<T>::remove(&hashed_key);
+
+            Self::deposit_event(RawEvent::MetadataRemoved(sender, key));
+
+            Ok(())
+        }
     }
+}
+
+fn contruct_hashkey(namespace: &Vec<u8>, key: &Vec<u8>) -> Vec<u8> {
+    // construct key
+    let namespace_hash = namespace.blake2_128();
+    let mut hashed_key: Vec<u8>= namespace_hash[..].into();
+    hashed_key.extend_from_slice(key);
+
+    hashed_key
 }

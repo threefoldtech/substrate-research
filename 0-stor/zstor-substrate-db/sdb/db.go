@@ -1,11 +1,16 @@
 package sdb
 
 import (
+	"bytes"
+	"fmt"
+
 	"github.com/pkg/errors"
 
 	"github.com/threefoldtech/0-stor/client/metastor/db"
 
 	gsrpc "github.com/leesmet/go-substrate-rpc-client"
+	"github.com/leesmet/go-substrate-rpc-client/hash"
+	"github.com/leesmet/go-substrate-rpc-client/scale"
 	"github.com/leesmet/go-substrate-rpc-client/signature"
 	"github.com/leesmet/go-substrate-rpc-client/types"
 )
@@ -76,14 +81,98 @@ func (s *Substrate) Set(namespace, key, metadata []byte) error {
 	return errors.Wrap(err, "could not submit extrinsic")
 }
 
+type Meta struct {
+	Data      []byte
+	AccountID types.AccountID
+}
+
 // Get implements db.DB
 func (s *Substrate) Get(namespace, key []byte) ([]byte, error) {
+	// hasher, err := hash.NewBlake2b128(namespace)
+	// if err != nil {
+	// 	return nil, errors.Wrap(err, "failed to create hash")
+	// }
+
+	// hash := hasher.Sum(nil)
+
+	// hash = append(hash, key...)
+	// storageKey, err := types.CreateStorageKey(s.meta, "TemplateModule", "MetaStor", hash, nil)
+	// if err != nil {
+	// 	return nil, errors.Wrap(err, "could not create storage key")
+	// }
+
+	// var meta Meta
+	// ok, err := s.api.RPC.State.GetStorageLatest(storageKey, &meta)
+	// if err != nil || !ok {
+	// 	return nil, errors.Wrap(err, "could not get latest storage key")
+	// }
+
+	// return meta.Data, nil
+
+	fmt.Printf("%s %s \n", string(namespace), string(key))
+
+	hasher, err := hash.NewBlake2b128(namespace)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create hash")
+	}
+
+	hash := hasher.Sum(nil)
+
+	hash = append(hash, key...)
+	fmt.Printf("%x \n", hash)
+
+	buf := bytes.NewBuffer(nil)
+	enc := scale.NewEncoder(buf)
+	err = enc.Encode(hash)
+	if err != nil {
+		panic(err)
+	}
+	hash = buf.Bytes()
+	fmt.Printf("%x \n", hash)
+
+	storageKey, err := types.CreateStorageKey(s.meta, "TemplateModule", "MetaStor", []byte{}, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not create storage key")
+	}
+
+	fmt.Printf("%x \n", storageKey)
+
+	keys, err := s.api.RPC.State.GetKeysLatest(storageKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not get latest storage key")
+	}
+
+	fmt.Println("storage keys:")
+	for _, key := range keys {
+		fmt.Printf("%x \n", key)
+	}
+
 	return nil, nil
 }
 
 // Delete implements db.DB
 func (s *Substrate) Delete(namespace, key []byte) error {
-	return nil
+	c, err := types.NewCall(s.meta, "TemplateModule.delete_metadata", namespace, key)
+	if err != nil {
+		return errors.Wrap(err, "could not create call")
+	}
+
+	ext := types.NewExtrinsic(c)
+
+	nonce, err := s.getNonce()
+	if err != nil {
+		errors.Wrap(err, "could not get nonce")
+	}
+
+	sigOpts := s.getSigOpts(uint64(nonce))
+
+	if err = ext.Sign(signature.TestKeyringPairAlice, sigOpts); err != nil {
+		return errors.Wrap(err, "could not sign extrinsic")
+	}
+
+	_, err = s.api.RPC.Author.SubmitExtrinsic(ext)
+
+	return errors.Wrap(err, "could not submit extrinsic")
 }
 
 // Update implements db.DB
@@ -93,11 +182,13 @@ func (s *Substrate) Update(namespace, key []byte, cb db.UpdateCallback) error {
 
 // ListKeys implements db.DB
 func (s *Substrate) ListKeys(namespace []byte, cb db.ListCallback) error {
+	fmt.Println("Listkeys")
 	return nil
 }
 
 // Close implements db.DB
 func (s *Substrate) Close() error {
+	fmt.Println("Close")
 	return nil
 }
 
