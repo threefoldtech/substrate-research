@@ -54,6 +54,8 @@ decl_event!(
         MetadataCreated(AccountId, Vec<u8>),
         /// Metadata was removed in a namespace. [who, key]
         MetadataRemoved(AccountId, Vec<u8>),
+        /// Metadata was updated in a namespace. [who, key]
+        MetadataUpdated(AccountId, Vec<u8>),
     }
 );
 
@@ -114,6 +116,25 @@ decl_module! {
             MetaStor::<T>::remove(namespace, &key);
 
             Self::deposit_event(RawEvent::MetadataRemoved(sender, key));
+
+            Ok(())
+        }
+
+        #[weight = 10_000] // TODO
+        pub fn update_metadata(origin, namespace: Vec<u8>, key: Vec<u8>, metadata: Vec<u8>) -> dispatch::DispatchResult {
+            let sender = ensure_signed(origin)?;
+
+            // Makse sure the key exists
+            ensure!(MetaStor::<T>::contains_key(&namespace, &key), Error::<T>::MetadataExists);
+
+            let (_, owner) = MetaStor::<T>::get(&namespace, &key);
+
+            // Make sure the owner and sender are the same person
+            ensure!(owner == sender, Error::<T>::NoPermissions);
+
+            MetaStor::<T>::insert(namespace, &key, (&metadata, &sender));
+
+            Self::deposit_event(RawEvent::MetadataUpdated(sender, key));
 
             Ok(())
         }

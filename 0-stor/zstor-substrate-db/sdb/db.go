@@ -146,7 +146,37 @@ func (s *Substrate) Delete(namespace, key []byte) error {
 
 // Update implements db.DB
 func (s *Substrate) Update(namespace, key []byte, cb db.UpdateCallback) error {
-	return nil
+	oldMeta, err := s.Get(namespace, key)
+	if err != nil {
+		return errors.Wrap(err, "could not get old metadata")
+	}
+
+	newMeta, err := cb(oldMeta)
+	if err != nil {
+		return errors.Wrap(err, "could not get old metadata")
+	}
+
+	c, err := types.NewCall(s.meta, "TemplateModule.update_metadata", namespace, key, newMeta)
+	if err != nil {
+		return errors.Wrap(err, "could not create call")
+	}
+
+	ext := types.NewExtrinsic(c)
+
+	nonce, err := s.getNonce()
+	if err != nil {
+		errors.Wrap(err, "could not get nonce")
+	}
+
+	sigOpts := s.getSigOpts(uint64(nonce))
+
+	if err = ext.Sign(signature.TestKeyringPairAlice, sigOpts); err != nil {
+		return errors.Wrap(err, "could not sign extrinsic")
+	}
+
+	_, err = s.api.RPC.Author.SubmitExtrinsic(ext)
+
+	return errors.Wrap(err, "could not submit extrinsic")
 }
 
 // ListKeys implements db.DB
