@@ -9,7 +9,6 @@ import (
 	"github.com/threefoldtech/0-stor/client/metastor/db"
 
 	gsrpc "github.com/leesmet/go-substrate-rpc-client"
-	"github.com/leesmet/go-substrate-rpc-client/hash"
 	"github.com/leesmet/go-substrate-rpc-client/scale"
 	"github.com/leesmet/go-substrate-rpc-client/signature"
 	"github.com/leesmet/go-substrate-rpc-client/types"
@@ -97,29 +96,15 @@ func (s *Substrate) Get(namespace, key []byte) ([]byte, error) {
 	}
 	encodedNamespace := buf.Bytes()
 
-	// blake2_128 hash of the encoded namespace
-	hasher, err := hash.NewBlake2b128(nil)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create hash")
-	}
-	// its fine to ignore the error here since it never errors in the first place
-	hasher.Write(encodedNamespace)
-	h := hasher.Sum(nil)
-
-	// concat hashed namespace and key
-	rawKey := append(h, key...)
-
-	// SCALE encode storage key
+	// SCALE encode key bytes
 	buf = bytes.NewBuffer(nil)
 	enc = scale.NewEncoder(buf)
-	err = enc.Encode(rawKey)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not encode raw storage key")
+	if err := enc.Encode(key); err != nil {
+		return nil, errors.Wrap(err, "could not encode raw key")
 	}
 	encodedKey := buf.Bytes()
 
-	// construct full storage key
-	storageKey, err := types.CreateStorageKey(s.meta, "TemplateModule", "MetaStor", encodedKey, nil)
+	storageKey, err := types.CreateStorageKey(s.meta, "TemplateModule", "MetaStor", encodedNamespace, encodedKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "could not create storage key")
 	}
@@ -166,7 +151,29 @@ func (s *Substrate) Update(namespace, key []byte, cb db.UpdateCallback) error {
 
 // ListKeys implements db.DB
 func (s *Substrate) ListKeys(namespace []byte, cb db.ListCallback) error {
-	fmt.Println("Listkeys")
+	// SCALE encode namespace bytes
+	buf := bytes.NewBuffer(nil)
+	enc := scale.NewEncoder(buf)
+	if err := enc.Encode(namespace); err != nil {
+		return errors.Wrap(err, "could not encode raw namespace")
+	}
+	encodedNamespace := buf.Bytes()
+
+	// construct full storage key
+	storageKey, err := types.CreateStorageKey(s.meta, "TemplateModule", "MetaStor", encodedNamespace, []byte{})
+	if err != nil {
+		return errors.Wrap(err, "could not create storage key")
+	}
+
+	keys, err := s.api.RPC.State.GetKeysLatest(storageKey)
+	if err != nil {
+		return errors.Wrap(err, "could not get latest storage key")
+	}
+
+	for _, key := range keys {
+		cb(bytes.TrimPrefix(key, []byte(storageKey)))
+	}
+
 	return nil
 }
 

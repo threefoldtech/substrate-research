@@ -40,7 +40,7 @@ decl_storage! {
         /// Item is a tuple, first element is the encoded metadata, second item is the account
         /// ID which originally inserted the metadata. Only this account can later update or delete
         /// it.
-        MetaStor get(fn meta_stor): map hasher(identity) Vec<u8> => (Vec<u8>, T::AccountId);
+        MetaStor get(fn meta_stor): double_map hasher(blake2_128_concat) Vec<u8>, hasher(identity) Vec<u8>=> (Vec<u8>, T::AccountId);
     }
 }
 
@@ -89,12 +89,10 @@ decl_module! {
         pub fn set_metadata(origin, namespace: Vec<u8>, key: Vec<u8>, metadata: Vec<u8>) -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
 
-            let hashed_key = contruct_hashkey(&namespace, &key);
-
             // Makse sure this is not an update, there is a separate function for that
-            ensure!(!MetaStor::<T>::contains_key(&hashed_key), Error::<T>::MetadataExists);
+            ensure!(!MetaStor::<T>::contains_key(&namespace, &key), Error::<T>::MetadataExists);
 
-            MetaStor::<T>::insert(&hashed_key, (&metadata, &sender));
+            MetaStor::<T>::insert(&namespace, &key, (&metadata, &sender));
 
             Self::deposit_event(RawEvent::MetadataCreated(sender, key));
 
@@ -105,30 +103,19 @@ decl_module! {
         pub fn delete_metadata(origin, namespace: Vec<u8>, key: Vec<u8>) -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
 
-            let hashed_key = contruct_hashkey(&namespace, &key);
-
             // Makse sure the key exists
-            ensure!(MetaStor::<T>::contains_key(&hashed_key), Error::<T>::MetadataExists);
+            ensure!(MetaStor::<T>::contains_key(&namespace, &key), Error::<T>::MetadataExists);
 
-            let (_, owner) = MetaStor::<T>::get(&hashed_key);
+            let (_, owner) = MetaStor::<T>::get(&namespace, &key);
 
             // Make sure the owner and sender are the same person
             ensure!(owner == sender, Error::<T>::NoPermissions);
 
-            MetaStor::<T>::remove(&hashed_key);
+            MetaStor::<T>::remove(namespace, &key);
 
             Self::deposit_event(RawEvent::MetadataRemoved(sender, key));
 
             Ok(())
         }
     }
-}
-
-fn contruct_hashkey(namespace: &Vec<u8>, key: &Vec<u8>) -> Vec<u8> {
-    // construct key
-    let namespace_hash = namespace.blake2_128();
-    let mut hashed_key: Vec<u8>= namespace_hash[..].into();
-    hashed_key.extend_from_slice(key);
-
-    hashed_key
 }
