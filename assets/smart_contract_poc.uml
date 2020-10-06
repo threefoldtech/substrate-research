@@ -16,7 +16,7 @@ Node --> Substrate: Picks up the contract is signed and funded
 Node --> Node: Deploy workload
 Node --> Substrate: Set the workload as deployed
 Farmer -> Substrate: Periodically claim funds
-Customer -> Substrate: Refund contract as needed to keep workload alive
+Customer -> Substrate: Add funds to contract as needed to keep workload alive
 Customer -> Substrate: Mark contract as finished
 Substrate --> Substrate: Pay out remaining due balance to farmer
 Substrate --> Substrate: Refund remainder to customer
