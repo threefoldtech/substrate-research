@@ -53,14 +53,40 @@ In the first phase we would make a proof of concept that handles the following p
 - Cancel reservation
 - ..
 
-We will use a Substrate node template and add a runtime pallet to it. This runtime pallet will expose functions that will be callable by the User / Farmer.
+We will use a Substrate node template and add a runtime pallet to it.
+This runtime pallet will expose functions that will be callable by the User / Farmer.
 
-In the pallet we will have runtime storage. Runtime storage allows you to store data in your blockchain that is persisted between blocks and can be accessed from within your runtime logic. In this storage we will save the information needed to create a contract between a User and a Farmer.
+In the pallet we will have runtime storage. Runtime storage allows you to store
+data in your blockchain that is persisted between blocks and can be accessed from
+within your runtime logic. In this storage we will save the information needed to
+create a contract between a User and a Farmer.
 
-When the user wants to create a reservation we will ask for a nodeID and the volume definition. With this nodeID we want to fetch the farmer's information of the *explorer*. We can do that with an off-chain worker. An off-chain worker will execute some specific logic before a block gets imported into the chain. With this worker we can fetch the farmer's prices to deploy workloads on his farm and store this in the runtime storage.
+When the user wants to create a reservation we will ask for a nodeID and the volume
+definition. With this nodeID we want to fetch the farmer's information of the *explorer*.
+We can do that with an off-chain worker. An off-chain worker will execute some
+specific logic before a block gets imported into the chain.
+With this worker we can fetch the farmer's prices to deploy workloads on his farm
+and store this in the runtime storage. Methods called by the worker will have
+verification so that only a specif key, or a specific set of keys, can sign them.
+As a result, only trusted workers can actually perform this functionality. While
+this is not ideal since it maintains the centralized explorer, that could be solved
+in a real world setup by moving the (static) data on chain as well. This could
+be done, for example, by integrating DID's. In such a scenario, farmer and node
+definition would be done on chain as well through DID's, meaning this part becomes
+fully decentralized.
 
-When we have the farmer's prices and the volume definition we can ask the user to pay a certain amount to deploy the workload. When a user pay's we will store the token amount on chain and release payments to the farmer gradually based on the usage of the volume.
+When we have the farmer's prices and the volume definition we can ask the user
+to pay a certain amount to deploy the workload. When a user pay's we will store
+the token amount on chain and release payments to the farmer gradually based on
+the usage of the volume.
 
-After a workload is paid for by the user we will fetch this information directly on the ZOS node and verify that it is indeed a workload for it to deploy. We will listen on changes on the blockchain to deploy / cancel the volume accordingly.
+After a workload is paid for by the user we will fetch this information directly
+on the ZOS node and verify that it is indeed a workload for it to deploy. We will
+listen on changes on the blockchain to deploy / cancel the volume accordingly.
 
 If a user wishes to cancel his workload we will refund.
+
+sequence diagram:
+
+![poc sequence diagram](../assets/smart_contract_poc.png)
+
