@@ -53,4 +53,14 @@ In the first phase we would make a proof of concept that handles the following p
 - Cancel reservation
 - ..
 
-If we can manage to get this working for this specific reservation type, we most likely can handle any other type.
+We will use a Substrate node template and add a runtime pallet to it. This runtime pallet will expose functions that will be callable by the User / Farmer.
+
+In the pallet we will have runtime storage. Runtime storage allows you to store data in your blockchain that is persisted between blocks and can be accessed from within your runtime logic. In this storage we will save the information needed to create a contract between a User and a Farmer.
+
+When the user wants to create a reservation we will ask for a nodeID and the volume definition. With this nodeID we want to fetch the farmer's information of the *explorer*. We can do that with an off-chain worker. An off-chain worker will execute some specific logic before a block gets imported into the chain. With this worker we can fetch the farmer's prices to deploy workloads on his farm and store this in the runtime storage.
+
+When we have the farmer's prices and the volume definition we can ask the user to pay a certain amount to deploy the workload. When a user pay's we will store the token amount on chain and release payments to the farmer gradually based on the usage of the volume.
+
+After a workload is paid for by the user we will fetch this information directly on the ZOS node and verify that it is indeed a workload for it to deploy. We will listen on changes on the blockchain to deploy / cancel the volume accordingly.
+
+If a user wishes to cancel his workload we will refund.
