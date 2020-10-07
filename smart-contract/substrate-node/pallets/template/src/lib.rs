@@ -5,17 +5,19 @@
 /// https://substrate.dev/docs/en/knowledgebase/runtime/frame
 use codec::{Decode, Encode};
 use frame_support::{
-    decl_error, decl_event, decl_module, decl_storage, dispatch, ensure, traits::Get,
+    decl_error, decl_event, decl_module, decl_storage, dispatch::{DispatchError, DispatchResult}, ensure,
+    traits::{
+		Currency, Get, ExistenceRequirement::AllowDeath, Randomness
+    },
+    sp_runtime::{traits::AccountIdConversion, ModuleId}
 };
-use frame_system::ensure_signed;
-use sp_core::RuntimeDebug;
+use frame_system::{self as system, ensure_signed};
+use sp_core::{RuntimeDebug, H256};
 use sp_std::{prelude::*, vec::Vec};
+use rand::Rng;
 
 #[cfg(test)]
 mod mock;
-
-#[cfg(test)]
-mod tests;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Encode, Decode, RuntimeDebug)]
 pub enum WorkloadState {
@@ -30,19 +32,47 @@ impl Default for WorkloadState {
     }
 }
 
+type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
+const PALLET_ID: ModuleId = ModuleId(*b"Charity!");
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Encode, Decode, Default, RuntimeDebug)]
 pub struct VolumeType {
-    pub disk_type: u8,
-    pub size: u64,
+    disk_type: u8,
+    size: u64,
 }
 
-pub type NodeID = std::string::String;
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Encode, Decode, RuntimeDebug)]
+pub struct Contract<T: Trait> {
+    cu_price: u64,
+    su_price: u64,
+    account_id: <T as system::Trait>::AccountId,
+    balance: BalanceOf<T>
+}
+
+impl<T> Default for Contract<T>
+    where T: Trait
+{
+    fn default() -> Contract<T> {
+        let account_id = PALLET_ID.into_account();
+        let balance = T::Currency::free_balance(&account_id);
+
+        Contract {
+            cu_price: 0,
+            su_price: 0,
+            account_id,
+            balance
+        }
+    }
+}
+
+pub type NodeID = Vec<u8>;
 pub type ID = u64;
 
-/// Configure the pallet by specifying the parameters and types on which it depends.
-pub trait Trait: frame_system::Trait {
-    /// Because this pallet emits events, it depends on the runtime's definition of an event.
-    type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
+pub trait Trait: system::Trait {
+    type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
+    /// The currency type that the charity deals in
+    type Currency: Currency<Self::AccountId>;
+    type RandomnessSource: Randomness<H256>;
 }
 
 decl_storage! {
@@ -52,107 +82,103 @@ decl_storage! {
         pub WorkloadCreated get(fn workloads_created): map hasher (blake2_128_concat) NodeID => Vec<ID>;
         pub WorkloadDeployed get(fn workloads_deployed): map hasher (blake2_128_concat) NodeID => Vec<ID>;
         pub VolumeReservations get(fn volume_reservations): map hasher (blake2_128_concat) ID => VolumeType;
+        pub Contracts get(fn contracts): map hasher (blake2_128_concat) ID => Contract<T>;
         ReservationID: u64;
     }
 }
 
-// Pallets use events to inform users when important changes are made.
-// https://substrate.dev/docs/en/knowledgebase/runtime/events
 decl_event!(
     pub enum Event<T>
     where
         AccountId = <T as frame_system::Trait>::AccountId,
-    {
-        /// A new kyc proof has been added to the did belonging to the account, supplied by the
-        /// given provider. [who, provider]
-        // KycProofAdded(AccountId, Vec<u8>),
-        ContractAdded(AccountId, NodeID),
-        ContractRejected(u64),
+    {        
+        // Will signal a contract has been added for a specific users, for a specific nodeID with a reservationID
+        ContractAdded(AccountId, NodeID, ID),
+        ContractPaid(AccountId, ID),
     }
 );
 
 // Errors inform users that something went wrong.
 decl_error! {
     pub enum Error for Module<T: Trait> {
-        /// A kyc object from this provider already exists for this user.
-        // ProviderExists,
-        /// The provider name exceeds the maximum length.
-        // ProviderTooLong,
         ReservationExists,
+        ContractExists,
+        ContractNotExists,
     }
 }
 
-// Dispatchable functions allows users to interact with the pallet and invoke state changes.
-// These functions materialize as "extrinsics", which are often compared to transactions.
-// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 decl_module! {
     pub struct Module<T: Trait> for enum Call where origin: T::Origin {
-        // Errors must be initialized if they are used by the pallet.
         type Error = Error<T>;
 
-        // Events must be initialized if they are used by the pallet.
         fn deposit_event() = default;
 
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn create_contract(origin, node_id: std::string::String, volume: VolumeType) -> dispatch::DispatchResult {
+        pub fn create_contract(origin, node_id: Vec<u8>, volume: VolumeType) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
             let reservation_id = ReservationID::get();
 
+            ensure!(!Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractExists);
+
+            // Create a contract
+            let mut contract = Contract::default();
+
+            // Create a new accountID based on the reservationID and assign it to the contract
+            let account_id = PALLET_ID.into_sub_account(reservation_id);
+            contract.account_id = account_id;
+
+            // Update the contract
+            Contracts::<T>::insert(&reservation_id, contract);
+
+            // TODO, make generic for each workload type
             VolumeReservations::insert(reservation_id, &volume);
             ReservationID::put(reservation_id + 1);
 
             ReservationsForAccount::<T>::mutate(&who, |list|  list.push(reservation_id));
 
-            Self::deposit_event(RawEvent::ContractAdded(who, node_id));
+            Self::deposit_event(RawEvent::ContractAdded(who, node_id, reservation_id));
 
             Ok(())
         }
 
-        // Reject will be called by the farmer
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn reject(origin, reservation_id: u64) -> dispatch::DispatchResult {
+        pub fn pay(origin, reservation_id: u64, amount: BalanceOf<T>) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            VolumeReservations::remove(reservation_id);
+            ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
 
-            // Remove reservation for a user's account
+            let mut contract = Contracts::<T>::get(reservation_id);
 
-            Self::deposit_event(RawEvent::ContractRejected(reservation_id));
+            // Transfer currency to the contracts account
+            T::Currency::transfer(&who, &contract.account_id, amount, AllowDeath)
+                .map_err(|_| DispatchError::Other("Can't make transfer"))?;
+
+            contract.balance = amount;
+
+            Contracts::<T>::insert(&reservation_id, &contract);
+            
+            Self::deposit_event(RawEvent::ContractPaid(contract.account_id, reservation_id));
 
             Ok(())
         }
 
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn set_price(origin) -> dispatch::DispatchResult {
+        pub fn claim_funds(origin) -> DispatchResult {
             let who = ensure_signed(origin)?;
             
             Ok(())
         }
 
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn pay(origin) -> dispatch::DispatchResult {
+        pub fn set_result(origin) -> DispatchResult {
             let who = ensure_signed(origin)?;
             
             Ok(())
         }
 
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn claim_funds(origin) -> dispatch::DispatchResult {
-            let who = ensure_signed(origin)?;
-            
-            Ok(())
-        }
-
-        #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn set_result(origin) -> dispatch::DispatchResult {
-            let who = ensure_signed(origin)?;
-            
-            Ok(())
-        }
-
-        #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn cancel(origin) -> dispatch::DispatchResult {
+        pub fn cancel(origin) -> DispatchResult {
             let who = ensure_signed(origin)?;
             
             Ok(())
