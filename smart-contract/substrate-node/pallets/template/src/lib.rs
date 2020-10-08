@@ -5,7 +5,7 @@
 /// https://substrate.dev/docs/en/knowledgebase/runtime/frame
 use codec::{Decode, Encode};
 use frame_support::{
-    decl_error, decl_event, decl_module, decl_storage, dispatch::{DispatchError, DispatchResult}, ensure,
+    decl_error, decl_event, decl_module, decl_storage, dispatch::{DispatchError, DispatchResult}, ensure, debug,
     traits::{
 		Currency, Get, ExistenceRequirement::AllowDeath, Randomness
     },
@@ -14,7 +14,6 @@ use frame_support::{
 use frame_system::{self as system, ensure_signed};
 use sp_core::{RuntimeDebug, H256};
 use sp_std::{prelude::*, vec::Vec};
-use rand::Rng;
 
 #[cfg(test)]
 mod mock;
@@ -32,7 +31,8 @@ impl Default for WorkloadState {
     }
 }
 
-type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
+pub type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
+
 const PALLET_ID: ModuleId = ModuleId(*b"Charity!");
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Encode, Decode, Default, RuntimeDebug)]
@@ -45,8 +45,8 @@ pub struct VolumeType {
 pub struct Contract<T: Trait> {
     cu_price: u64,
     su_price: u64,
-    account_id: <T as system::Trait>::AccountId,
-    balance: BalanceOf<T>
+    account_id: T::AccountId,
+    node_id: Vec<u8>,
 }
 
 impl<T> Default for Contract<T>
@@ -54,35 +54,30 @@ impl<T> Default for Contract<T>
 {
     fn default() -> Contract<T> {
         let account_id = PALLET_ID.into_account();
-        let balance = T::Currency::free_balance(&account_id);
 
         Contract {
             cu_price: 0,
             su_price: 0,
             account_id,
-            balance
+            node_id: [0].to_vec(),
         }
     }
 }
 
-pub type NodeID = Vec<u8>;
-pub type ID = u64;
-
 pub trait Trait: system::Trait {
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
-    /// The currency type that the charity deals in
     type Currency: Currency<Self::AccountId>;
     type RandomnessSource: Randomness<H256>;
 }
 
 decl_storage! {
     trait Store for Module<T: Trait> as TemplateModule {
-        pub ReservationState get(fn reservation_state): map hasher(blake2_128_concat) ID => WorkloadState;
-        pub ReservationsForAccount get(fn reservations_for_account): map hasher(blake2_128_concat) T::AccountId => Vec<ID>;
-        pub WorkloadCreated get(fn workloads_created): map hasher (blake2_128_concat) NodeID => Vec<ID>;
-        pub WorkloadDeployed get(fn workloads_deployed): map hasher (blake2_128_concat) NodeID => Vec<ID>;
-        pub VolumeReservations get(fn volume_reservations): map hasher (blake2_128_concat) ID => VolumeType;
-        pub Contracts get(fn contracts): map hasher (blake2_128_concat) ID => Contract<T>;
+        pub ReservationState get(fn reservation_state): map hasher(blake2_128_concat) u64 => WorkloadState;
+        pub ReservationsForAccount get(fn reservations_for_account): map hasher(blake2_128_concat) T::AccountId => Vec<u64>;
+        pub WorkloadCreated get(fn workloads_created): map hasher (blake2_128_concat) Vec<u8> => Vec<u64>;
+        pub WorkloadDeployed get(fn workloads_deployed): map hasher (blake2_128_concat) Vec<u8> => Vec<u64>;
+        pub VolumeReservations get(fn volume_reservations): map hasher (blake2_128_concat) u64 => VolumeType;
+        pub Contracts get(fn contracts): map hasher (blake2_128_concat) u64 => Contract<T>;
         ReservationID: u64;
     }
 }
@@ -93,8 +88,8 @@ decl_event!(
         AccountId = <T as frame_system::Trait>::AccountId,
     {        
         // Will signal a contract has been added for a specific users, for a specific nodeID with a reservationID
-        ContractAdded(AccountId, NodeID, ID),
-        ContractPaid(AccountId, ID),
+        ContractAdded(AccountId, Vec<u8>, u64),
+        ContractPaid(AccountId, u64),
     }
 );
 
@@ -124,12 +119,20 @@ decl_module! {
             // Create a contract
             let mut contract = Contract::default();
 
+            contract.node_id = node_id.clone();
+            debug::info!("Contract with id: {:?} and nodeId: {:?}", reservation_id, contract.node_id);
+
             // Create a new accountID based on the reservationID and assign it to the contract
             let account_id = PALLET_ID.into_sub_account(reservation_id);
+            let _ = T::Currency::make_free_balance_be(
+				&account_id,
+				T::Currency::minimum_balance(),
+            );
+            debug::info!("Assigned accountID: {:?} to contract with id: {:?}", account_id, reservation_id);
             contract.account_id = account_id;
 
             // Update the contract
-            Contracts::<T>::insert(&reservation_id, contract);
+            Contracts::<T>::insert(&reservation_id, &contract);
 
             // TODO, make generic for each workload type
             VolumeReservations::insert(reservation_id, &volume);
@@ -148,40 +151,37 @@ decl_module! {
 
             ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
 
-            let mut contract = Contracts::<T>::get(reservation_id);
+            let contract = Contracts::<T>::get(reservation_id);
 
+            debug::info!("Transfering: {:?} from {:?} to contract accountId: {:?}", &amount, &who, &contract.account_id);
             // Transfer currency to the contracts account
             T::Currency::transfer(&who, &contract.account_id, amount, AllowDeath)
                 .map_err(|_| DispatchError::Other("Can't make transfer"))?;
-
-            contract.balance = amount;
-
-            Contracts::<T>::insert(&reservation_id, &contract);
             
             Self::deposit_event(RawEvent::ContractPaid(contract.account_id, reservation_id));
 
             Ok(())
         }
 
-        #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn claim_funds(origin) -> DispatchResult {
-            let who = ensure_signed(origin)?;
+        // #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
+        // pub fn claim_funds(origin) -> DispatchResult {
+        //     let who = ensure_signed(origin)?;
             
-            Ok(())
-        }
+        //     Ok(())
+        // }
 
-        #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn set_result(origin) -> DispatchResult {
-            let who = ensure_signed(origin)?;
+        // #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
+        // pub fn set_result(origin) -> DispatchResult {
+        //     let who = ensure_signed(origin)?;
             
-            Ok(())
-        }
+        //     Ok(())
+        // }
 
-        #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn cancel(origin) -> DispatchResult {
-            let who = ensure_signed(origin)?;
+        // #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
+        // pub fn cancel(origin) -> DispatchResult {
+        //     let who = ensure_signed(origin)?;
             
-            Ok(())
-        }
+        //     Ok(())
+        // }
     }
 }
