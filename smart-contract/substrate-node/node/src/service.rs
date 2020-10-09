@@ -87,6 +87,26 @@ pub fn new_full(config: Configuration) -> Result<TaskManager, ServiceError> {
 		other: (block_import, grandpa_link),
 	} = new_partial(&config)?;
 
+	// This clones the key for Alice.
+	let dev_seed = config.dev_key_seed.clone();
+
+	// let service = builder.with_network_protocol(|_| Ok(NodeProtocol::new()))?
+	// .with_finality_proof_provider(|client, backend|
+	// 	Ok(Arc::new(GrandpaFinalityProofProvider::new(backend, client)) as _)
+	// )?
+	// .build()?;
+
+	// Add the following section to add the key to the keystore.
+	if let Some(seed) = dev_seed {
+		keystore
+			.write()
+			.insert_ephemeral_from_seed_by_type::<node_template_runtime::pallet_template::crypto::Pair>(
+			&seed,
+			node_template_runtime::pallet_template::KEY_TYPE,
+			)
+			.expect("Dev Seed should always succeed.");
+	}
+
 	let finality_proof_provider =
 		GrandpaFinalityProofProvider::new_for_service(backend.clone(), client.clone());
 
