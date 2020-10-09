@@ -13,7 +13,7 @@ use frame_support::{
 };
 use frame_system::{self as system, ensure_signed};
 use sp_core::{RuntimeDebug, H256};
-use sp_std::{prelude::*, vec::Vec};
+use sp_std::prelude::*;
 
 #[cfg(test)]
 mod mock;
@@ -146,7 +146,7 @@ decl_module! {
         }
 
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn pay(origin, reservation_id: u64, amount: BalanceOf<T>) -> DispatchResult {
+        pub fn pay(origin, reservation_id: u64, #[compact] amount: BalanceOf<T>) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
             ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);

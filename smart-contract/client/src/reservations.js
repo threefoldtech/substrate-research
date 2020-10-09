@@ -1,6 +1,5 @@
 const { getApiClient } = require('./api')
 const { Keyring } = require('@polkadot/api')
-const { createType } = require('@polkadot/types')
 
 async function createReservation (nodeID, diskType, size) {
   const api = await getApiClient()
@@ -38,7 +37,7 @@ async function payReservation (id, amount) {
   const keyring = new Keyring({ type: 'sr25519' })
   const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
 
-  const balance = createType(api.registry, 'BalanceOf', amount * 1000000000000000)
+  const balance = api.createType('BalanceOf', amount * 1000000000000)
 
   return api.tx.templateModule
     .pay(id, balance)
