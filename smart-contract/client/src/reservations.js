@@ -1,7 +1,7 @@
 const { getApiClient } = require('./api')
 const { Keyring } = require('@polkadot/api')
 
-async function createReservation (nodeID, diskType, size) {
+async function createReservation (nodeID, diskType, size, callback) {
   const api = await getApiClient()
   const keyring = new Keyring({ type: 'sr25519' })
   const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
@@ -13,7 +13,7 @@ async function createReservation (nodeID, diskType, size) {
 
   return api.tx.templateModule
     .createContract(nodeID, volume)
-    .signAndSend(BOB)
+    .signAndSend(BOB, callback)
 }
 
 async function getReservation (id) {
@@ -36,7 +36,7 @@ async function getReservation (id) {
   }
 }
 
-async function payReservation (id, amount) {
+async function payReservation (id, amount, callback) {
   const api = await getApiClient()
   const keyring = new Keyring({ type: 'sr25519' })
   const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
@@ -45,7 +45,17 @@ async function payReservation (id, amount) {
 
   return api.tx.templateModule
     .pay(id, balance)
-    .signAndSend(BOB)
+    .signAndSend(BOB, callback)
+}
+
+async function acceptContract (id, callback) {
+  const api = await getApiClient()
+  const keyring = new Keyring({ type: 'sr25519' })
+  const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
+
+  return api.tx.templateModule
+    .acceptContract(id)
+    .signAndSend(BOB, callback)
 }
 
 function hexToAscii (str1) {
@@ -60,5 +70,6 @@ function hexToAscii (str1) {
 module.exports = {
   createReservation,
   getReservation,
-  payReservation
+  payReservation,
+  acceptContract
 }

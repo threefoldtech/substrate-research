@@ -26,7 +26,7 @@ use frame_system::{
 		AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer,
 	},
 };
-use sp_core::{RuntimeDebug, H256, ed25519, crypto::Ss58Codec};
+use sp_core::{RuntimeDebug, H256, ed25519};
 use sp_std::{
 	prelude::*, str
 };
@@ -234,6 +234,7 @@ decl_error! {
 		NoLocalAcctForSigning,
         OffchainSignedTxError,
         NoLocalAcctForSignedTx,
+        UnauthorizedFarmer,
     }
 }
 
@@ -325,8 +326,11 @@ decl_module! {
 
             let mut contract = Contracts::<T>::get(reservation_id);
 
-            // TODO: Only farmer can sign this
             let who = ensure_signed(origin)?;
+
+            let farmer_account = T::AccountId::decode(&mut &contract.farmer_address[..]).unwrap_or_default();
+
+            ensure!(farmer_account == who, Error::<T>::UnauthorizedFarmer);
 
             contract.accepted = true;
 
@@ -388,10 +392,6 @@ impl<T: Trait> Module<T> {
 
         let decoded = <[u8; 32]>::from_hex(farm.pubkey.clone()).expect("Decoding failed");
         let farmer_address = ed25519::Public::from_raw(decoded);
-
-        // TODO: LEE
-        let address = Ss58Codec::to_ss58check(&farmer_address);
-        debug::info!("Address for farm: {:?}, {:?}", farm.farm_info.id, address);
 
         // retrieve contract account
         let signer = Signer::<T, T::AuthorityId>::any_account();
