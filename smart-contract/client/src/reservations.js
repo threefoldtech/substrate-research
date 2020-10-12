@@ -19,6 +19,8 @@ async function createReservation (nodeID, diskType, size) {
 async function getReservation (id) {
   const api = await getApiClient()
   const contract = await api.query.templateModule.contracts(id)
+  const volume = await api.query.templateModule.volumeReservations(id)
+  const state = await api.query.templateModule.reservationState(id)
 
   // Retrieve the account balance via the system module
   const { data: balance } = await api.query.system.account(contract.account_id)
@@ -28,7 +30,9 @@ async function getReservation (id) {
 
   return {
     ...json,
-    balance: balance.free.toNumber()
+    balance: balance.free.toNumber(),
+    volume: volume.toJSON(),
+    state: state.toJSON()
   }
 }
 

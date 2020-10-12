@@ -16,9 +16,7 @@ async function getApiClient () {
         size: 'u64'
       },
       WorkloadState: {
-        Created: 'WorkloadState::Created',
-        Deployed: 'WorkloadState::Deployed',
-        Cancelled: 'WorkloadState::Cancelled'
+        _enum: ['Created', 'Deployed', 'Cancelled']
       },
       // override custom
       Address: 'AccountId',
