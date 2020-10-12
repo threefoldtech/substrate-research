@@ -26,11 +26,12 @@ use frame_system::{
 		AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer,
 	},
 };
-use sp_core::{RuntimeDebug, H256};
+use sp_core::{RuntimeDebug, H256, ed25519, crypto::Ss58Codec};
 use sp_std::{
 	prelude::*, str
 };
 use alt_serde::{Deserialize, Deserializer};
+use hex::FromHex;
 use sp_core::crypto::KeyTypeId;
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
@@ -45,7 +46,7 @@ pub mod crypto {
 	use sp_runtime::{
 		traits::Verify,
 		MultiSignature, MultiSigner,
-	};
+    };
 
 	app_crypto!(sr25519, KEY_TYPE);
 
@@ -99,6 +100,8 @@ pub struct Contract<T: Trait> {
     su_price: u64,
     account_id: T::AccountId,
     node_id: Vec<u8>,
+    farmer_address: sp_core::ed25519::Public,
+    accepted: bool
 }
 
 impl<T> Default for Contract<T>
@@ -112,12 +115,15 @@ impl<T> Default for Contract<T>
             su_price: 0,
             account_id,
             node_id: [0].to_vec(),
+            farmer_address: sp_core::ed25519::Public::from_raw([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]),
+            accepted: false
         }
     }
 }
 
 pub const EXPLORER_NODES: &str = "https://explorer.grid.tf/explorer/nodes/";
 pub const EXPLORER_FARMS: &str = "https://explorer.grid.tf/explorer/farms/";
+pub const EXPLORER_USERS: &str = "https://explorer.grid.tf/explorer/users/";
 pub const FETCH_TIMEOUT_PERIOD: u64 = 10000; // in milli-seconds
 pub const LOCK_TIMEOUT_EXPIRATION: u64 = FETCH_TIMEOUT_PERIOD + 1000; // in milli-seconds
 pub const LOCK_BLOCK_EXPIRATION: u32 = 3; // in block number
@@ -136,7 +142,19 @@ struct NodeInfo {
 struct FarmInfo {
     id: u64,
     threebot_id: u64,
-	resource_prices: Vec<ResourcePrice>,
+    resource_prices: Vec<ResourcePrice>
+}
+
+struct Farm {
+    farm_info: FarmInfo,
+    pubkey: Vec<u8>,
+}
+
+#[serde(crate = "alt_serde")]
+#[derive(Deserialize, Encode, Decode, Default)]
+struct UserInfo {
+    #[serde(deserialize_with = "de_string_to_bytes")]
+    pubkey: Vec<u8>
 }
 
 #[serde(crate = "alt_serde")]
@@ -199,6 +217,8 @@ decl_event!(
         ContractAdded(AccountId, Vec<u8>, u64),
         ContractPaid(AccountId, u64),
         ContractUpdated(AccountId, u64),
+        // Will signal a contract being accepted for a NodeID and a reservation ID
+        ContractAccepted(Vec<u8>, u64),
     }
 );
 
@@ -279,9 +299,9 @@ decl_module! {
         }
 
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn set_contract_price(origin, reservation_id: u64, cu_price: u64, su_price: u64) -> DispatchResult {
+        pub fn set_contract_price(origin, reservation_id: u64, cu_price: u64, su_price: u64, farmer_address: sp_core::ed25519::Public) -> DispatchResult {
             // TODO: Only off chain worker can sign this
-            let _ = ensure_signed(origin)?;
+            let who = ensure_signed(origin)?;
 
             ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
 
@@ -289,11 +309,31 @@ decl_module! {
 
             contract.cu_price = cu_price;
             contract.su_price = su_price;
+            contract.farmer_address = farmer_address;
 
             // Update the contract
             Contracts::<T>::insert(&reservation_id, &contract);
             
             Self::deposit_event(RawEvent::ContractUpdated(contract.account_id, reservation_id));
+
+            Ok(())
+        }
+
+        #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
+        pub fn accept_contract(origin, reservation_id: u64) -> DispatchResult {
+            ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
+
+            let mut contract = Contracts::<T>::get(reservation_id);
+
+            // TODO: Only farmer can sign this
+            let who = ensure_signed(origin)?;
+
+            contract.accepted = true;
+
+            // Update the contract
+            Contracts::<T>::insert(&reservation_id, &contract);
+            
+            Self::deposit_event(RawEvent::ContractAccepted(contract.node_id, reservation_id));
 
             Ok(())
         }
@@ -333,7 +373,7 @@ impl<T: Trait> Module<T> {
         debug::info!("Contract with ID: {:?} and nodeID: {:?}", reservation_id, contract.node_id);
 
         
-        let farm_info = Self::fetch_farmer_prices(contract.node_id).map_err(|err| {
+        let farm = Self::fetch_farmer_prices(contract.node_id).map_err(|err| {
             debug::info!("{:?}", err); 
             err
         })?;
@@ -341,15 +381,23 @@ impl<T: Trait> Module<T> {
         reservation_id_storage.set(&reservation_id);
         
         // This is the on-chain function
-        let cru_price = farm_info.resource_prices[0].cru;
-        let sru_price = farm_info.resource_prices[0].sru;
-        debug::info!("Prices for farm: {:?}, cru price: {:?}, sru price: {:?}", farm_info.id, cru_price, sru_price);
-        
+        let cru_price = farm.farm_info.resource_prices[0].cru;
+        let sru_price = farm.farm_info.resource_prices[0].sru;
+        debug::info!("Prices for farm: {:?}, cru price: {:?}, sru price: {:?}", farm.farm_info.id, cru_price, sru_price);
+        debug::info!("Pubkey before parsing hex farm: {:?}, {:?}", farm.farm_info.id, farm.pubkey);
+
+        let decoded = <[u8; 32]>::from_hex(farm.pubkey.clone()).expect("Decoding failed");
+        let farmer_address = ed25519::Public::from_raw(decoded);
+
+        // TODO: LEE
+        let address = Ss58Codec::to_ss58check(&farmer_address);
+        debug::info!("Address for farm: {:?}, {:?}", farm.farm_info.id, address);
+
         // retrieve contract account
         let signer = Signer::<T, T::AuthorityId>::any_account();
 
         let result = signer.send_signed_transaction(|_acct|
-            Call::set_contract_price(reservation_id, cru_price, sru_price)
+            Call::set_contract_price(reservation_id, cru_price, sru_price, farmer_address)
         );
     
         // Display error if the signed tx fails.
@@ -366,7 +414,7 @@ impl<T: Trait> Module<T> {
         return Err(<Error<T>>::NoLocalAcctForSignedTx)
     }
 
-	fn fetch_farmer_prices(node_id: Vec<u8>) -> Result<FarmInfo, Error<T>> {
+	fn fetch_farmer_prices(node_id: Vec<u8>) -> Result<Farm, Error<T>> {
 		let mut lock = StorageLock::<BlockAndTime<Self>>::with_block_and_time_deadline(
 			b"offchain-explorer::lock", LOCK_BLOCK_EXPIRATION,
 			rt_offchain::Duration::from_millis(LOCK_TIMEOUT_EXPIRATION)
@@ -377,7 +425,16 @@ impl<T: Trait> Module<T> {
 				Ok(node_info) => {
                     match Self::fetch_n_parse_farm(node_info.farm_id) {
                         Ok(farm_info) => {
-                            return Ok(farm_info)
+                            match Self::fetch_n_parse_user(farm_info.threebot_id) {
+                                Ok(user_info) => {
+                                    let farm = Farm {
+                                        farm_info,
+                                        pubkey: user_info.pubkey
+                                    };
+                                    return Ok(farm)
+                                }
+                                Err(err) => { return Err(err); }
+                            }
                         }
                         Err(err) => { return Err(err); }
                     }
@@ -388,6 +445,7 @@ impl<T: Trait> Module<T> {
         return Err(<Error<T>>::HttpFetchingError)
     }
     
+
 	fn fetch_n_parse_node(node_id: Vec<u8>) -> Result<NodeInfo, Error<T>> {
         debug::info!("fetching node");
 		let resp_bytes = Self::fetch_node_from_remote(node_id).map_err(|e| {
@@ -410,6 +468,7 @@ impl<T: Trait> Module<T> {
         Ok(node_farm_info)
 
     }
+
     fn fetch_n_parse_farm(farm_id: u64) -> Result<FarmInfo, Error<T>> {
         // Fetch farm next
         debug::info!("fetching farm");
@@ -431,6 +490,28 @@ impl<T: Trait> Module<T> {
         debug::info!("got farm response");
     
         Ok(farm_info)
+    }
+
+    fn fetch_n_parse_user(threebot_id: u64) -> Result<UserInfo, Error<T>> {
+        debug::info!("fetching user");
+        let resp_bytes = Self::fetch_user_from_remote(threebot_id).map_err(|e| {
+            debug::error!("fetch_node_from_remote error: {:?}", e);
+            <Error<T>>::HttpFetchingError
+        })?;
+    
+        let resp_str = str::from_utf8(&resp_bytes).map_err(|err| {
+            debug::info!("{:?}", err); 
+            <Error<T>>::HttpFetchingError
+        })?;
+        debug::info!("{}", resp_str);
+    
+        let user_info: UserInfo = serde_json::from_str(&resp_str).map_err(|err| {
+            debug::info!("{:?}", err); 
+            <Error<T>>::HttpFetchingError
+        })?;
+        debug::info!("got farm response");
+    
+        Ok(user_info)
     }
     
     /// This function uses the `offchain::http` API to query the remote github information,
@@ -470,6 +551,37 @@ impl<T: Trait> Module<T> {
         let mut h = EXPLORER_FARMS.as_bytes().to_vec();
         h.extend_from_slice(&Self::to_str_bytes(farm_id));
     
+        let p = str::from_utf8(&h).unwrap();
+
+        debug::info!("sending request to: {:?}", p);
+
+		let request = rt_offchain::http::Request::get(&p);
+
+		let timeout = sp_io::offchain::timestamp()
+			.add(rt_offchain::Duration::from_millis(FETCH_TIMEOUT_PERIOD));
+
+		let pending = request
+			.deadline(timeout) // Setting the timeout time
+			.send() // Sending the request out by the host
+			.map_err(|_| <Error<T>>::HttpFetchingError)?;
+
+		let response = pending
+			.try_wait(timeout)
+			.map_err(|_| <Error<T>>::HttpFetchingError)?
+			.map_err(|_| <Error<T>>::HttpFetchingError)?;
+
+		if response.code != 200 {
+			debug::error!("Unexpected http request status code: {}", response.code);
+			return Err(<Error<T>>::HttpFetchingError);
+		}
+
+		Ok(response.body().collect::<Vec<u8>>())
+    }
+
+    fn fetch_user_from_remote(threebot_id: u64) -> Result<Vec<u8>, Error<T>> {        
+        let mut h = EXPLORER_USERS.as_bytes().to_vec();
+        h.extend_from_slice(&Self::to_str_bytes(threebot_id));
+
         let p = str::from_utf8(&h).unwrap();
 
         debug::info!("sending request to: {:?}", p);
