@@ -1,6 +1,6 @@
 const yargs = require('yargs')
 const { exit } = require('yargs')
-const { createReservation, getReservation, payReservation, acceptContract } = require('./src/reservations')
+const { createReservation, getReservation, payReservation, acceptContract, claimContractFunds } = require('./src/reservations')
 
 const argv = yargs
   .command('create', 'Create a volume reservation', {
@@ -40,6 +40,13 @@ const argv = yargs
     }
   })
   .command('acceptContract', 'Accept a reservation by ID', {
+    reservationId: {
+      description: 'Reservation ID',
+      alias: 'id',
+      type: 'string'
+    }
+  })
+  .command('claimContractFunds', 'Claim funds off a contract', {
     reservationId: {
       description: 'Reservation ID',
       alias: 'id',
@@ -108,6 +115,26 @@ if (argv._.includes('acceptContract')) {
   if (argv.id === '') console.log('Bad params')
 
   acceptContract(argv.id, ({ events = [], status }) => {
+    console.log(`Current status is ${status.type}`)
+
+    if (status.isFinalized) {
+      console.log(`Transaction included at blockHash ${status.asFinalized}`)
+
+      // Loop through Vec<EventRecord> to display all events
+      events.forEach(({ phase, event: { data, method, section } }) => {
+        console.log(`\t' ${phase}: ${section}.${method}:: ${data}`)
+      })
+      exit(1)
+    }
+  }).catch(err => {
+    console.log(err)
+    exit(1)
+  })
+}
+if (argv._.includes('claimContractFunds')) {
+  if (argv.id === '') console.log('Bad params')
+
+  claimContractFunds(argv.id, ({ events = [], status }) => {
     console.log(`Current status is ${status.type}`)
 
     if (status.isFinalized) {

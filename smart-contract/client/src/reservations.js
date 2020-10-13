@@ -41,10 +41,8 @@ async function payReservation (id, amount, callback) {
   const keyring = new Keyring({ type: 'sr25519' })
   const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
 
-  const balance = api.createType('BalanceOf', amount * 1000000000000)
-
   return api.tx.templateModule
-    .pay(id, balance)
+    .pay(id, amount)
     .signAndSend(BOB, callback)
 }
 
@@ -55,6 +53,16 @@ async function acceptContract (id, callback) {
 
   return api.tx.templateModule
     .acceptContract(id)
+    .signAndSend(BOB, callback)
+}
+
+async function claimContractFunds (id, callback) {
+  const api = await getApiClient()
+  const keyring = new Keyring({ type: 'sr25519' })
+  const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
+
+  return api.tx.templateModule
+    .claimFunds(id)
     .signAndSend(BOB, callback)
 }
 
@@ -71,5 +79,6 @@ module.exports = {
   createReservation,
   getReservation,
   payReservation,
-  acceptContract
+  acceptContract,
+  claimContractFunds
 }

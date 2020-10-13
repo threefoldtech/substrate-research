@@ -23,7 +23,8 @@ async function getApiClient () {
       // override custom
       Address: 'AccountId',
       LookupSource: 'AccountId',
-      BalanceOf: 'Balance'
+      BalanceOf: 'Balance',
+      Public: '[u8;32]'
     }
   })
 }

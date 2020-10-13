@@ -49,3 +49,15 @@ Parameters:
 * **-a**: Amount to fund the contract with.
 
 `node index.js payReservation --id 0 --a 5000`
+
+## Accepting a contract
+
+Contract's can be accepted by the farmer, this will set the boolean `accepted` to true, indicating that the contract's prices are aggreed, the contract is funded and the workload is ready to deploy.
+
+`node index.js acceptContract --id 0`
+
+## Claiming funds of a contract
+
+Contract funds can be claimed only by the farmer party of the contract. To claim funds:
+
+`node index.js claimContractFunds --id 0`

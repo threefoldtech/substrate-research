@@ -219,6 +219,7 @@ decl_event!(
         ContractUpdated(AccountId, u64),
         // Will signal a contract being accepted for a NodeID and a reservation ID
         ContractAccepted(Vec<u8>, u64),
+        ContractFundsClaimed(u64),
     }
 );
 
@@ -302,7 +303,7 @@ decl_module! {
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
         pub fn set_contract_price(origin, reservation_id: u64, cu_price: u64, su_price: u64, farmer_address: sp_core::ed25519::Public) -> DispatchResult {
             // TODO: Only off chain worker can sign this
-            let who = ensure_signed(origin)?;
+            let _ = ensure_signed(origin)?;
 
             ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
 
@@ -322,14 +323,14 @@ decl_module! {
 
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
         pub fn accept_contract(origin, reservation_id: u64) -> DispatchResult {
+            let who = ensure_signed(origin)?;
             ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
 
             let mut contract = Contracts::<T>::get(reservation_id);
 
-            let who = ensure_signed(origin)?;
-
             let farmer_account = T::AccountId::decode(&mut &contract.farmer_address[..]).unwrap_or_default();
 
+            // Ensure only the farmer of the contract can accept the contract
             ensure!(farmer_account == who, Error::<T>::UnauthorizedFarmer);
 
             contract.accepted = true;
@@ -338,6 +339,31 @@ decl_module! {
             Contracts::<T>::insert(&reservation_id, &contract);
             
             Self::deposit_event(RawEvent::ContractAccepted(contract.node_id, reservation_id));
+
+            Ok(())
+        }
+
+        #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
+        pub fn claim_funds(origin, reservation_id: u64) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
+
+            let contract = Contracts::<T>::get(reservation_id);
+
+            let farmer_account = T::AccountId::decode(&mut &contract.farmer_address[..]).unwrap_or_default();
+
+            // Ensure only the farmer of the contract can claim the funds
+            ensure!(farmer_account == who, Error::<T>::UnauthorizedFarmer);
+
+            // Get the contract's balance
+            let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
+
+            debug::info!("Transfering: {:?} from contract {:?} to farmer {:?}", &balance, &contract.account_id, &who);
+            // Transfer currency to the farmers account
+            T::Currency::transfer(&contract.account_id, &farmer_account, balance, AllowDeath)
+                .map_err(|_| DispatchError::Other("Can't make transfer"))?;
+
+            Self::deposit_event(RawEvent::ContractFundsClaimed(reservation_id));
 
             Ok(())
         }
