@@ -100,7 +100,7 @@ pub struct Contract<T: Trait> {
     su_price: u64,
     account_id: T::AccountId,
     node_id: Vec<u8>,
-    farmer_address: sp_core::ed25519::Public,
+    farmer_account: T::AccountId,
     accepted: bool
 }
 
@@ -109,21 +109,22 @@ impl<T> Default for Contract<T>
 {
     fn default() -> Contract<T> {
         let account_id = PALLET_ID.into_account();
+        let farmer_account = PALLET_ID.into_account();
 
         Contract {
             cu_price: 0,
             su_price: 0,
             account_id,
             node_id: [0].to_vec(),
-            farmer_address: sp_core::ed25519::Public::from_raw([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]),
+            farmer_account,
             accepted: false
         }
     }
 }
 
-pub const EXPLORER_NODES: &str = "https://explorer.grid.tf/explorer/nodes/";
-pub const EXPLORER_FARMS: &str = "https://explorer.grid.tf/explorer/farms/";
-pub const EXPLORER_USERS: &str = "https://explorer.grid.tf/explorer/users/";
+pub const EXPLORER_NODES: &str = "https://explorer.devnet.grid.tf/explorer/nodes/";
+pub const EXPLORER_FARMS: &str = "https://explorer.devnet.grid.tf/explorer/farms/";
+pub const EXPLORER_USERS: &str = "https://explorer.devnet.grid.tf/explorer/users/";
 pub const FETCH_TIMEOUT_PERIOD: u64 = 10000; // in milli-seconds
 pub const LOCK_TIMEOUT_EXPIRATION: u64 = FETCH_TIMEOUT_PERIOD + 1000; // in milli-seconds
 pub const LOCK_BLOCK_EXPIRATION: u32 = 3; // in block number
@@ -301,7 +302,7 @@ decl_module! {
         }
 
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn set_contract_price(origin, reservation_id: u64, cu_price: u64, su_price: u64, farmer_address: sp_core::ed25519::Public) -> DispatchResult {
+        pub fn set_contract_price(origin, reservation_id: u64, cu_price: u64, su_price: u64, farmer_account: <T as frame_system::Trait>::AccountId) -> DispatchResult {
             // TODO: Only off chain worker can sign this
             let _ = ensure_signed(origin)?;
 
@@ -311,7 +312,7 @@ decl_module! {
 
             contract.cu_price = cu_price;
             contract.su_price = su_price;
-            contract.farmer_address = farmer_address;
+            contract.farmer_account = farmer_account;
 
             // Update the contract
             Contracts::<T>::insert(&reservation_id, &contract);
@@ -328,10 +329,8 @@ decl_module! {
 
             let mut contract = Contracts::<T>::get(reservation_id);
 
-            let farmer_account = T::AccountId::decode(&mut &contract.farmer_address[..]).unwrap_or_default();
-
             // Ensure only the farmer of the contract can accept the contract
-            ensure!(farmer_account == who, Error::<T>::UnauthorizedFarmer);
+            ensure!(contract.farmer_account == who, Error::<T>::UnauthorizedFarmer);
 
             contract.accepted = true;
 
@@ -350,17 +349,15 @@ decl_module! {
 
             let contract = Contracts::<T>::get(reservation_id);
 
-            let farmer_account = T::AccountId::decode(&mut &contract.farmer_address[..]).unwrap_or_default();
-
             // Ensure only the farmer of the contract can claim the funds
-            ensure!(farmer_account == who, Error::<T>::UnauthorizedFarmer);
+            ensure!(contract.farmer_account == who, Error::<T>::UnauthorizedFarmer);
 
             // Get the contract's balance
             let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
 
             debug::info!("Transfering: {:?} from contract {:?} to farmer {:?}", &balance, &contract.account_id, &who);
             // Transfer currency to the farmers account
-            T::Currency::transfer(&contract.account_id, &farmer_account, balance, AllowDeath)
+            T::Currency::transfer(&contract.account_id, &contract.farmer_account, balance, AllowDeath)
                 .map_err(|_| DispatchError::Other("Can't make transfer"))?;
 
             Self::deposit_event(RawEvent::ContractFundsClaimed(reservation_id));
@@ -423,7 +420,7 @@ impl<T: Trait> Module<T> {
         let signer = Signer::<T, T::AuthorityId>::any_account();
 
         let result = signer.send_signed_transaction(|_acct|
-            Call::set_contract_price(reservation_id, cru_price, sru_price, farmer_address)
+            Call::set_contract_price(reservation_id, cru_price, sru_price, T::AccountId::decode(&mut &farmer_address[..]).unwrap_or_default())
         );
     
         // Display error if the signed tx fails.

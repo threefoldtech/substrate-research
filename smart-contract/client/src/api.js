@@ -10,7 +10,7 @@ async function getApiClient () {
         su_price: 'u64',
         account_id: 'AccountId',
         node_id: 'Vec<u8>',
-        farmer_address: '[u8;32]',
+        farmer_address: 'AccountId',
         accepted: 'bool'
       },
       VolumeType: {
