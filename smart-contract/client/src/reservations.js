@@ -1,5 +1,6 @@
 const { getApiClient } = require('./api')
 const { Keyring } = require('@polkadot/api')
+const bip39 = require('bip39')
 
 async function createReservation (nodeID, diskType, size, callback) {
   const api = await getApiClient()
@@ -46,24 +47,26 @@ async function payReservation (id, amount, callback) {
     .signAndSend(BOB, callback)
 }
 
-async function acceptContract (id, callback) {
+async function acceptContract (id, mnemonic, callback) {
   const api = await getApiClient()
-  const keyring = new Keyring({ type: 'sr25519' })
-  const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
+
+  const key = getPrivatekey(mnemonic)
 
   return api.tx.templateModule
     .acceptContract(id)
-    .signAndSend(BOB, callback)
+    .signAndSend(key, callback)
 }
 
-async function claimContractFunds (id, callback) {
+async function claimContractFunds (id, mnemonic, callback) {
   const api = await getApiClient()
-  const keyring = new Keyring({ type: 'sr25519' })
-  const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
+
+  console.log(mnemonic)
+
+  const key = getPrivatekey(mnemonic)
 
   return api.tx.templateModule
     .claimFunds(id)
-    .signAndSend(BOB, callback)
+    .signAndSend(key, callback)
 }
 
 function hexToAscii (str1) {
@@ -73,6 +76,14 @@ function hexToAscii (str1) {
     str += String.fromCharCode(parseInt(hex.substr(n, 2), 16))
   }
   return str
+}
+
+function getPrivatekey (mnemonic) {
+  let entropy = bip39.mnemonicToEntropy(mnemonic)
+  entropy = '0x' + entropy
+
+  const keyring = new Keyring()
+  return keyring.addFromUri(entropy)
 }
 
 module.exports = {

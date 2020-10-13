@@ -44,12 +44,22 @@ const argv = yargs
       description: 'Reservation ID',
       alias: 'id',
       type: 'string'
+    },
+    mnemonic: {
+      description: 'Mnemonic to sign with',
+      alias: 'm',
+      type: 'string'
     }
   })
   .command('claimContractFunds', 'Claim funds off a contract', {
     reservationId: {
       description: 'Reservation ID',
       alias: 'id',
+      type: 'string'
+    },
+    mnemonic: {
+      description: 'Mnemonic to sign with',
+      alias: 'm',
       type: 'string'
     }
   })
@@ -112,9 +122,12 @@ if (argv._.includes('payReservation')) {
   })
 }
 if (argv._.includes('acceptContract')) {
-  if (argv.id === '') console.log('Bad params')
+  if (argv.id === '' || !argv.m) {
+    console.log('Bad Params')
+    exit(1)
+  }
 
-  acceptContract(argv.id, ({ events = [], status }) => {
+  acceptContract(argv.id, argv.m, ({ events = [], status }) => {
     console.log(`Current status is ${status.type}`)
 
     if (status.isFinalized) {
@@ -132,9 +145,12 @@ if (argv._.includes('acceptContract')) {
   })
 }
 if (argv._.includes('claimContractFunds')) {
-  if (argv.id === '') console.log('Bad params')
+  if (argv.id === '' || !argv.m) {
+    console.log('Bad Params')
+    exit(1)
+  }
 
-  claimContractFunds(argv.id, ({ events = [], status }) => {
+  claimContractFunds(argv.id, argv.m, ({ events = [], status }) => {
     console.log(`Current status is ${status.type}`)
 
     if (status.isFinalized) {
