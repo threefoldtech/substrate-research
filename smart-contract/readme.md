@@ -9,7 +9,7 @@ cd substrate-node
 cargo build --release
 ```
 
-This will build the node binary in relaese mode, once built you can execute it by doing following:
+This will build the node binary in release mode, once built you can execute it by doing following:
 
 `./target/release/node-template --dev --tmp`
 
