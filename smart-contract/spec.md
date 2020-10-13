@@ -51,6 +51,7 @@ In the first phase we would make a proof of concept that handles the following p
 - Handle funds of this aggreement (Payments will not include Stellar TFT).
 - Deploy Volume reservation on a ZOS node.
 - Cancel reservation
+- Payment to farmer
 - ..
 
 We will use a Substrate node template and add a runtime pallet to it.
@@ -75,16 +76,60 @@ be done, for example, by integrating DID's. In such a scenario, farmer and node
 definition would be done on chain as well through DID's, meaning this part becomes
 fully decentralized.
 
+The main reason to fetch the farmer data is so that we can set the price of the
+resources consumed in the contract, as well as set the public key of the farmer.
+This then allows us to verify that it is actually the farmer, and nobody else,
+who accepts the contract. To accomplish this, we can derive the SS58 address
+(the substrate address format) from the public key we fetched (ed25519 keys are
+supported in substrate). We also don't need to save any kind of signature in the
+runtime storage, a simple bool would suffice. Reason being that the code can only
+be called successfully by the given key, and the extrinsic (the transaction which
+called the method) which contains a signature from this keypair is recorded in
+the block and therefore verifiable by everyone.
+
 When we have the farmer's prices and the volume definition we can ask the user
 to pay a certain amount to deploy the workload. When a user pay's we will store
 the token amount on chain and release payments to the farmer gradually based on
-the usage of the volume.
+the usage of the volume. In an ideal situation, these payments would be automated
+from within the chain. This would however place a lot of stress on the runtime,
+since it needs to verify, at every block, if there are contracts to pay out, and
+if so do that. So instead, we will opt to do some tracking of when the workload
+was deployed, and when the farmer withdrew funds for the last time. Then, when
+a farmer makes a new withdraw request, we can easily calculate how much tokens
+he should receive from the contract using a linear function. If the farmer wishes
+to have some kind of periodic payment, then he can simply set this up via the farmer
+threebot, which can call a periodic function for all interesting contracts.
 
 After a workload is paid for by the user we will fetch this information directly
 on the ZOS node and verify that it is indeed a workload for it to deploy. We will
 listen on changes on the blockchain to deploy / cancel the volume accordingly.
 
-If a user wishes to cancel his workload we will refund.
+When a workload is deployed (successfully or failed), the node should send this
+back to the chain. Ideally, the node itself would make a call with the result.
+This can be verified, since the node can use its same keypair that it's already
+using right now, to sign the call. Then the blockchain can verify that the address
+which made the call is indeed the same as the one in the contract, similar to how
+we can secure the farmer agreement flow. This does mean that every node needs a
+small amount of funds to pay tx fees. If this is found to be not feasible, we can
+alternatively integrate the farmer threebot in the deployment flow, so the farmer
+ultimately pushes the result back. Again, verification of the sending address can
+then be done against the farmer key like before, to make sure its the real farmer
+that pushes a result.
+
+Ideally, the contract itself would know when it is out of funds. This might be hard
+to actually accomplish though, since it requires running logic for every contract
+in every block. Therd might be a solution by adding every contract ID in a separate
+collection, and running code after every block which checks if the contract has
+expired. This solution hinges on the ability to generate events in post-block import
+logic, rather than in actual extrinsics in a block itself. This is something we
+need to investigate. The other solution would be to have the farmer threebot monitor
+relevant contracts, and having them call a cancel function once the funds run out.
+
+If a user wishes to cancel his workload, we can calculate how much the farmer is
+owed (by checking when he last withdrew funds). Then the remaining contract balance
+can be split and paid out accordingly, where the user receives all remaining funds
+after the farmer received what he was still owed. This would mean that a user can
+cancel his workload at any time and receive his unused tokens back.
 
 sequence diagram:
 
