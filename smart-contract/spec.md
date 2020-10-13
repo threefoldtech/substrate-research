@@ -8,13 +8,13 @@ The current smart contract 4 IT on the Threefold Grid is centralized. It is owne
 
 The TFexplorer is responsible for deploying, decomissioning, refunding, .. of workloads. It is the intermediate party between the User and the Farmer on the Threefold Grid. For more details on the workings of the current model: https://manual2.threefold.io/#/smartcontract_details
 
-The issue with this architecture is that there is a single point of failure. In this case it can be the machine where this explorer is running on. 
+The issue with this architecture is that there is a single point of failure. In this case it can be the machines where the explorers are running on.
 
 We, as a company, also promote decentralization in any way possible. The very way we run this critical component centralized is contradictionary.
 
 ## Proposed architecture
 
-We need to change how the intermediate party is handled in order to achieve true decentralization. This component needs to act as a trusted party which nobody has control over, not even us. The best way to achieve this is with some sort of blockchain technology. A blockchain Where we can have the smart contract 4 IT on it. If it's on the blockchain, everybody can verify that it exists and that it cannot be tampered with. Eventually this party handles money, which is very sensitive.
+We need to change how the intermediate party is handled in order to achieve true decentralization. This component needs to act as a trusted party which nobody has control over, not even us. The best way to achieve this is with some sort of blockchain technology. A blockchain where we can have the smart contract 4 IT on it. If it's on the blockchain, everybody can verify that it exists and that it cannot be tampered with. Eventually this party handles money, which is very sensitive.
 
 The blockchain can be used to track the following information which is crucial in the deployment of workloads:
 
