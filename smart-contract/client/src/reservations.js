@@ -69,6 +69,16 @@ async function claimContractFunds (id, mnemonic, callback) {
     .signAndSend(key, callback)
 }
 
+async function cancelContract (id, callback) {
+  const api = await getApiClient()
+  const keyring = new Keyring({ type: 'sr25519' })
+  const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
+
+  return api.tx.templateModule
+    .cancelContract(id)
+    .signAndSend(BOB, callback)
+}
+
 function hexToAscii (str1) {
   const hex = str1.toString()
   let str = ''
@@ -91,5 +101,6 @@ module.exports = {
   getReservation,
   payReservation,
   acceptContract,
-  claimContractFunds
+  claimContractFunds,
+  cancelContract
 }

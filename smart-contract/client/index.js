@@ -1,6 +1,6 @@
 const yargs = require('yargs')
 const { exit } = require('yargs')
-const { createReservation, getReservation, payReservation, acceptContract, claimContractFunds } = require('./src/reservations')
+const { createReservation, getReservation, payReservation, acceptContract, claimContractFunds, cancelContract } = require('./src/reservations')
 
 const argv = yargs
   .command('create', 'Create a volume reservation', {
@@ -60,6 +60,13 @@ const argv = yargs
     mnemonic: {
       description: 'Mnemonic to sign with',
       alias: 'm',
+      type: 'string'
+    }
+  })
+  .command('cancelContract', 'Cancel a reservation by ID', {
+    reservationId: {
+      description: 'Reservation ID',
+      alias: 'id',
       type: 'string'
     }
   })
@@ -151,6 +158,26 @@ if (argv._.includes('claimContractFunds')) {
   }
 
   claimContractFunds(argv.id, argv.m, ({ events = [], status }) => {
+    console.log(`Current status is ${status.type}`)
+
+    if (status.isFinalized) {
+      console.log(`Transaction included at blockHash ${status.asFinalized}`)
+
+      // Loop through Vec<EventRecord> to display all events
+      events.forEach(({ phase, event: { data, method, section } }) => {
+        console.log(`\t' ${phase}: ${section}.${method}:: ${data}`)
+      })
+      exit(1)
+    }
+  }).catch(err => {
+    console.log(err)
+    exit(1)
+  })
+}
+if (argv._.includes('cancelContract')) {
+  if (argv.id === '') console.log('Bad params')
+
+  cancelContract(argv.id, ({ events = [], status }) => {
     console.log(`Current status is ${status.type}`)
 
     if (status.isFinalized) {

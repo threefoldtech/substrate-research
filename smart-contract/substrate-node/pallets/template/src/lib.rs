@@ -101,6 +101,7 @@ pub struct Contract<T: Trait> {
     account_id: T::AccountId,
     node_id: Vec<u8>,
     farmer_account: T::AccountId,
+    user_account: T::AccountId,
     accepted: bool
 }
 
@@ -110,6 +111,7 @@ impl<T> Default for Contract<T>
     fn default() -> Contract<T> {
         let account_id = PALLET_ID.into_account();
         let farmer_account = PALLET_ID.into_account();
+        let user_account = PALLET_ID.into_account();
 
         Contract {
             cu_price: 0,
@@ -117,6 +119,7 @@ impl<T> Default for Contract<T>
             account_id,
             node_id: [0].to_vec(),
             farmer_account,
+            user_account,
             accepted: false
         }
     }
@@ -218,6 +221,7 @@ decl_event!(
         ContractAdded(AccountId, Vec<u8>, u64),
         ContractPaid(AccountId, u64),
         ContractUpdated(AccountId, u64),
+        ContractCancelled(Vec<u8>, u64),
         // Will signal a contract being accepted for a NodeID and a reservation ID
         ContractAccepted(Vec<u8>, u64),
         ContractFundsClaimed(u64),
@@ -230,6 +234,7 @@ decl_error! {
         ReservationExists,
         ContractExists,
         ContractNotExists,
+        ContractNotAccepted,
         UnknownOffchainMux,
         HttpFetchingError,
         // Error returned when making signed transactions in off-chain worker
@@ -237,6 +242,7 @@ decl_error! {
         OffchainSignedTxError,
         NoLocalAcctForSignedTx,
         UnauthorizedFarmer,
+        UnauthorizedUser,
     }
 }
 
@@ -269,6 +275,9 @@ decl_module! {
             debug::info!("Assigned accountID: {:?} to contract with id: {:?}", account_id, reservation_id);
             contract.account_id = account_id;
 
+            // Add the user account to the contract
+            contract.user_account = who.clone();
+
             // Update the contract
             Contracts::<T>::insert(&reservation_id, &contract);
 
@@ -290,6 +299,8 @@ decl_module! {
             ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
 
             let contract = Contracts::<T>::get(reservation_id);
+
+            // ensure!(contract.accepted == true, Error::<T>::ContractNotAccepted);
 
             debug::info!("Transfering: {:?} from {:?} to contract accountId: {:?}", &amount, &who, &contract.account_id);
             // Transfer currency to the contracts account
@@ -361,6 +372,29 @@ decl_module! {
                 .map_err(|_| DispatchError::Other("Can't make transfer"))?;
 
             Self::deposit_event(RawEvent::ContractFundsClaimed(reservation_id));
+
+            Ok(())
+        }
+
+        #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
+        pub fn cancel_contract(origin, reservation_id: u64) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
+
+            let contract = Contracts::<T>::get(reservation_id);
+
+            // Ensure only the farmer of the contract can accept the contract
+            ensure!(contract.user_account == who, Error::<T>::UnauthorizedUser);
+
+            // Get the contract's balance
+            let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
+
+            debug::info!("Transfering: {:?} from contract {:?} to farmer {:?}", &balance, &contract.account_id, &who);
+            // Transfer currency to the farmers account
+            T::Currency::transfer(&contract.account_id, &contract.user_account, balance, AllowDeath)
+                .map_err(|_| DispatchError::Other("Can't make transfer"))?;
+
+            Self::deposit_event(RawEvent::ContractCancelled(contract.node_id, reservation_id));
 
             Ok(())
         }
