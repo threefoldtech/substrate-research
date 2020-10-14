@@ -33,7 +33,7 @@ use sp_std::{
 use alt_serde::{Deserialize, Deserializer};
 use hex::FromHex;
 use sp_core::crypto::KeyTypeId;
-
+use bs58;
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
 
 /// Based on the above `KeyTypeId` we need to generate a pallet-specific crypto type wrapper.
@@ -102,7 +102,8 @@ pub struct Contract<T: Trait> {
     node_id: Vec<u8>,
     farmer_account: T::AccountId,
     user_account: T::AccountId,
-    accepted: bool
+    accepted: bool,
+    workload_state: WorkloadState
 }
 
 impl<T> Default for Contract<T>
@@ -120,7 +121,8 @@ impl<T> Default for Contract<T>
             node_id: [0].to_vec(),
             farmer_account,
             user_account,
-            accepted: false
+            accepted: false,
+            workload_state: WorkloadState::Created,
         }
     }
 }
@@ -221,6 +223,7 @@ decl_event!(
         ContractAdded(AccountId, Vec<u8>, u64),
         ContractPaid(AccountId, u64),
         ContractUpdated(AccountId, u64),
+        ContractDeployed(Vec<u8>, u64),
         ContractCancelled(Vec<u8>, u64),
         // Will signal a contract being accepted for a NodeID and a reservation ID
         ContractAccepted(Vec<u8>, u64),
@@ -243,6 +246,7 @@ decl_error! {
         NoLocalAcctForSignedTx,
         UnauthorizedFarmer,
         UnauthorizedUser,
+        UnauthorizedNode
     }
 }
 
@@ -395,6 +399,54 @@ decl_module! {
                 .map_err(|_| DispatchError::Other("Can't make transfer"))?;
 
             Self::deposit_event(RawEvent::ContractCancelled(contract.node_id, reservation_id));
+
+            Ok(())
+        }
+
+        #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
+        pub fn contract_cancelled(origin, reservation_id: u64) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
+
+            let mut contract = Contracts::<T>::get(reservation_id);
+
+            // Ensure the node signed
+            let mut decoded = [0u8;32];
+            let _ = bs58::decode(&contract.node_id).into(&mut decoded).unwrap();
+
+            let node_address = ed25519::Public::from_raw(decoded);
+            ensure!(T::AccountId::decode(&mut &node_address[..]).unwrap_or_default() == who, Error::<T>::UnauthorizedNode);
+
+            contract.workload_state = WorkloadState::Cancelled;
+
+            // Update the contract
+            Contracts::<T>::insert(&reservation_id, &contract);
+            
+            Self::deposit_event(RawEvent::ContractUpdated(contract.account_id, reservation_id));
+
+            Ok(())
+        }
+
+        #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
+        pub fn contract_deployed(origin, reservation_id: u64) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
+
+            let mut contract = Contracts::<T>::get(reservation_id);
+
+            // Ensure the node signed
+            let mut decoded = [0u8;32];
+            let _ = bs58::decode(&contract.node_id).into(&mut decoded).unwrap();
+
+            let node_address = ed25519::Public::from_raw(decoded);
+            ensure!(T::AccountId::decode(&mut &node_address[..]).unwrap_or_default() == who, Error::<T>::UnauthorizedNode);
+
+            contract.workload_state = WorkloadState::Deployed;
+
+            // Update the contract
+            Contracts::<T>::insert(&reservation_id, &contract);
+            
+            Self::deposit_event(RawEvent::ContractDeployed(contract.node_id, reservation_id));
 
             Ok(())
         }

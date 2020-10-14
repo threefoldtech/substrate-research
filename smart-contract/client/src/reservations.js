@@ -23,6 +23,7 @@ async function getReservation (id) {
   const volume = await api.query.templateModule.volumeReservations(id)
   const state = await api.query.templateModule.reservationState(id)
 
+  console.log(state)
   // Retrieve the account balance via the system module
   const { data: balance } = await api.query.system.account(contract.account_id)
 
@@ -33,7 +34,7 @@ async function getReservation (id) {
     ...json,
     balance: balance.free.toNumber(),
     volume: volume.toJSON(),
-    state: state.toJSON()
+    // state: state.toJSON()
   }
 }
 

@@ -12,20 +12,21 @@ async function getApiClient () {
         node_id: 'Vec<u8>',
         farmer_account: 'AccountId',
         user_account: 'AccountId',
-        accepted: 'bool'
+        accepted: 'bool',
+        workload_state: 'WorkloadState'
       },
       VolumeType: {
         disk_type: 'u8',
         size: 'u64'
       },
-      WorkloadState: {
-        _enum: ['Created', 'Deployed', 'Cancelled']
-      },
       // override custom
       Address: 'AccountId',
       LookupSource: 'AccountId',
       BalanceOf: 'Balance',
-      Public: '[u8;32]'
+      Public: '[u8;32]',
+      WorkloadState: {
+        _enum: ['Created', 'Deployed', 'Cancelled']
+      }
     }
   })
 }

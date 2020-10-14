@@ -3613,6 +3613,7 @@ name = "pallet-template"
 version = "2.0.0"
 dependencies = [
  "alt_serde",
+ "bs58",
  "frame-support",
  "frame-system",
  "hex",
