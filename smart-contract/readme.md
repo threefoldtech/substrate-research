@@ -26,6 +26,8 @@ yarn install
 
 > The client uses the keys of **Bob** the sign for transactions in all the examples. The user **Bob** is a dummy user created when the chain starts.
 
+If you want to run this example on a zos node: [get zos ready](./zos.md)
+
 ## Creating a contract for a Volume reservation
 
 Parameters:
