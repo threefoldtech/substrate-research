@@ -11,7 +11,9 @@ cargo build --release
 
 This will build the node binary in release mode, once built you can execute it by doing following:
 
-`./target/release/node-template --dev --tmp`
+`./target/release/node-template --dev --tmp --ws-external`
+
+> You need the `ws-external` flag in order to connect from a zos node to substrate in a local setup.
 
 Now you can build the client to interact with this node:
 
@@ -38,7 +40,7 @@ Parameters:
 
 Contract ID's are incremented sequentially. If you create your first contract the ID will be 0, the second will be 1, etc...
 
-`node index.js getReservation --id 0`
+`node index.js get --id 0`
 
 ## Funding a contract.
 
@@ -48,7 +50,13 @@ Parameters:
 
 * **-a**: Amount to fund the contract with.
 
-`node index.js payReservation --id 0 --a 5000`
+`node index.js pay --id 0 --a 5000`
+
+## Cancelling a contract.
+
+Will decomission the workload on zos and refund the user.
+
+`node index.js cancel --id 0`
 
 ## Accepting a contract
 
@@ -58,7 +66,7 @@ Parameters:
 
 * **-m**: Mnemonic of the farmer.
 
-`node index.js acceptContract --id 0`
+`node index.js accept --id 0 --m seedwords`
 
 ## Claiming funds of a contract
 
@@ -68,5 +76,4 @@ Parameters:
 
 * **-m**: Mnemonic of the farmer.
 
-
-`node index.js claimContractFunds --id 0`
+`node index.js claim --id 0 --m seedwords`

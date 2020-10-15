@@ -393,8 +393,8 @@ decl_module! {
             // Get the contract's balance
             let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
 
-            debug::info!("Transfering: {:?} from contract {:?} to farmer {:?}", &balance, &contract.account_id, &who);
-            // Transfer currency to the farmers account
+            debug::info!("Transfering: {:?} from contract {:?} to user {:?}", &balance, &contract.account_id, &who);
+            // Transfer currency to the users account
             T::Currency::transfer(&contract.account_id, &contract.user_account, balance, AllowDeath)
                 .map_err(|_| DispatchError::Other("Can't make transfer"))?;
 

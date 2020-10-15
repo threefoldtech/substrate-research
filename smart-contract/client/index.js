@@ -1,16 +1,16 @@
 const yargs = require('yargs')
 const { exit } = require('yargs')
-const { createReservation, getReservation, payReservation, acceptContract, claimContractFunds, cancelContract } = require('./src/reservations')
+const { createContract, getContract, payContract, acceptContract, claimContractFunds, cancelContract } = require('./src/contracts')
 
 const argv = yargs
-  .command('create', 'Create a volume reservation', {
+  .command('create', 'Create a volume contract', {
     nodeID: {
       description: 'ID of the node to deploy on',
       alias: 'n',
       type: 'string'
     },
     type: {
-      description: 'Volume disk type',
+      description: 'Volume disk type (1 for HDD, 2 for SSD)',
       alias: 't',
       type: 'number'
     },
@@ -20,16 +20,16 @@ const argv = yargs
       type: 'number'
     }
   })
-  .command('getReservation', 'Get a reservation by ID', {
-    reservationId: {
-      description: 'Reservation ID',
+  .command('get', 'Get a contract by ID', {
+    contractID: {
+      description: 'Contract ID',
       alias: 'id',
       type: 'string'
     }
   })
-  .command('payReservation', 'Get a reservation by ID', {
-    reservationId: {
-      description: 'Reservation ID',
+  .command('pay', 'Pay for a contract by ID', {
+    contractID: {
+      description: 'Contract ID',
       alias: 'id',
       type: 'string'
     },
@@ -39,9 +39,9 @@ const argv = yargs
       type: 'number'
     }
   })
-  .command('acceptContract', 'Accept a reservation by ID', {
-    reservationId: {
-      description: 'Reservation ID',
+  .command('accept', 'Accept a contract by ID', {
+    contractID: {
+      description: 'Contract ID',
       alias: 'id',
       type: 'string'
     },
@@ -51,9 +51,9 @@ const argv = yargs
       type: 'string'
     }
   })
-  .command('claimContractFunds', 'Claim funds off a contract', {
-    reservationId: {
-      description: 'Reservation ID',
+  .command('claim', 'Claim funds off a contract by ID', {
+    contractID: {
+      description: 'Contract ID',
       alias: 'id',
       type: 'string'
     },
@@ -63,9 +63,9 @@ const argv = yargs
       type: 'string'
     }
   })
-  .command('cancelContract', 'Cancel a reservation by ID', {
-    reservationId: {
-      description: 'Reservation ID',
+  .command('cancel', 'Cancel a contract by ID', {
+    contractID: {
+      description: 'Contract ID',
       alias: 'id',
       type: 'string'
     }
@@ -75,9 +75,12 @@ const argv = yargs
   .argv
 
 if (argv._.includes('create')) {
-  if (argv.n === '' || argv.t === '' || argv.s === '') console.log('Bad params')
+  if (!argv.n || !argv.t || argv.s) {
+    console.log('Bad Params')
+    exit(1)
+  }
 
-  createReservation(argv.n, argv.t, argv.s, ({ events = [], status }) => {
+  createContract(argv.n, argv.t, argv.s, ({ events = [], status }) => {
     console.log(`Current status is ${status.type}`)
 
     if (status.isFinalized) {
@@ -94,10 +97,13 @@ if (argv._.includes('create')) {
     exit(1)
   })
 }
-if (argv._.includes('getReservation')) {
-  if (argv.id === '') console.log('Bad params')
+if (argv._.includes('get')) {
+  if (!argv.id) {
+    console.log('Bad Params')
+    exit(1)
+  }
 
-  getReservation(argv.id)
+  getContract(argv.id)
     .then(contract => {
       console.log('\ncontract: ')
       console.log(contract)
@@ -108,10 +114,13 @@ if (argv._.includes('getReservation')) {
       exit(1)
     })
 }
-if (argv._.includes('payReservation')) {
-  if (argv.id === '' || argv.a === 0) console.log('Bad params')
+if (argv._.includes('pay')) {
+  if (!argv.id || !argv.a) {
+    console.log('Bad Params')
+    exit(1)
+  }
 
-  payReservation(argv.id, argv.a.toString(), ({ events = [], status }) => {
+  payContract(argv.id, argv.a.toString(), ({ events = [], status }) => {
     console.log(`Current status is ${status.type}`)
 
     if (status.isFinalized) {
@@ -128,7 +137,7 @@ if (argv._.includes('payReservation')) {
     exit(1)
   })
 }
-if (argv._.includes('acceptContract')) {
+if (argv._.includes('accept')) {
   if (argv.id === '' || !argv.m) {
     console.log('Bad Params')
     exit(1)
@@ -151,7 +160,7 @@ if (argv._.includes('acceptContract')) {
     exit(1)
   })
 }
-if (argv._.includes('claimContractFunds')) {
+if (argv._.includes('claim')) {
   if (argv.id === '' || !argv.m) {
     console.log('Bad Params')
     exit(1)
@@ -174,8 +183,11 @@ if (argv._.includes('claimContractFunds')) {
     exit(1)
   })
 }
-if (argv._.includes('cancelContract')) {
-  if (argv.id === '') console.log('Bad params')
+if (argv._.includes('cancel')) {
+  if (!argv.id) {
+    console.log('Bad Params')
+    exit(1)
+  }
 
   cancelContract(argv.id, ({ events = [], status }) => {
     console.log(`Current status is ${status.type}`)

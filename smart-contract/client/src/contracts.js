@@ -2,7 +2,7 @@ const { getApiClient } = require('./api')
 const { Keyring } = require('@polkadot/api')
 const bip39 = require('bip39')
 
-async function createReservation (nodeID, diskType, size, callback) {
+async function createContract (nodeID, diskType, size, callback) {
   const api = await getApiClient()
   const keyring = new Keyring({ type: 'sr25519' })
   const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
@@ -17,13 +17,11 @@ async function createReservation (nodeID, diskType, size, callback) {
     .signAndSend(BOB, callback)
 }
 
-async function getReservation (id) {
+async function getContract (id) {
   const api = await getApiClient()
   const contract = await api.query.templateModule.contracts(id)
   const volume = await api.query.templateModule.volumeReservations(id)
-  const state = await api.query.templateModule.reservationState(id)
 
-  console.log(state)
   // Retrieve the account balance via the system module
   const { data: balance } = await api.query.system.account(contract.account_id)
 
@@ -33,12 +31,11 @@ async function getReservation (id) {
   return {
     ...json,
     balance: balance.free.toNumber(),
-    volume: volume.toJSON(),
-    // state: state.toJSON()
+    volume: volume.toJSON()
   }
 }
 
-async function payReservation (id, amount, callback) {
+async function payContract (id, amount, callback) {
   const api = await getApiClient()
   const keyring = new Keyring({ type: 'sr25519' })
   const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
@@ -98,9 +95,9 @@ function getPrivatekey (mnemonic) {
 }
 
 module.exports = {
-  createReservation,
-  getReservation,
-  payReservation,
+  createContract,
+  getContract,
+  payContract,
   acceptContract,
   claimContractFunds,
   cancelContract
