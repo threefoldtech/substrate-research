@@ -75,7 +75,7 @@ const argv = yargs
   .argv
 
 if (argv._.includes('create')) {
-  if (!argv.n || !argv.t || argv.s) {
+  if (!argv.n || !argv.t || !argv.s) {
     console.log('Bad Params')
     exit(1)
   }
