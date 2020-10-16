@@ -12,7 +12,7 @@ use frame_support::{
 		Currency, Get, ExistenceRequirement::AllowDeath, Randomness
     },
     sp_runtime::{
-        traits::AccountIdConversion, ModuleId,
+        traits::AccountIdConversion, ModuleId, traits::SaturatedConversion,
         offchain as rt_offchain,
         offchain::{
             storage::StorageValueRef,
@@ -35,6 +35,8 @@ use hex::FromHex;
 use sp_core::crypto::KeyTypeId;
 use bs58;
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
+use pallet_timestamp as timestamp;
+use fixed::{types::I32F32, types::U128F0, types::U64F64};
 
 /// Based on the above `KeyTypeId` we need to generate a pallet-specific crypto type wrapper.
 /// We can utilize the supported crypto kinds (`sr25519`, `ed25519` and `ecdsa`) and augment
@@ -94,16 +96,48 @@ pub struct VolumeType {
     size: u64,
 }
 
+pub struct RSU {
+    cru: u64,
+    hru: I32F32,
+    sru: I32F32,
+    mru: I32F32
+}
+
+impl VolumeType {
+    fn getRsu(&self) -> RSU {
+        match self.disk_type {
+            1 => {
+                RSU{
+                    hru: I32F32::from_num(self.size),
+                    sru: I32F32::from_num(0),
+                    mru: I32F32::from_num(0),
+                    cru: 0,
+                }
+            }
+            2 => {
+                RSU{
+                    hru: I32F32::from_num(0),
+                    sru: I32F32::from_num(self.size),
+                    mru: I32F32::from_num(0),
+                    cru: 0,
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Encode, Decode, RuntimeDebug)]
 pub struct Contract<T: Trait> {
-    cu_price: u64,
-    su_price: u64,
+    resource_prices: ResourcePrice,
     account_id: T::AccountId,
     node_id: Vec<u8>,
     farmer_account: T::AccountId,
     user_account: T::AccountId,
     accepted: bool,
-    workload_state: WorkloadState
+    workload_state: WorkloadState,
+    expires_at: u64,
+    last_claimed: u64
 }
 
 impl<T> Default for Contract<T>
@@ -115,14 +149,15 @@ impl<T> Default for Contract<T>
         let user_account = PALLET_ID.into_account();
 
         Contract {
-            cu_price: 0,
-            su_price: 0,
+            resource_prices: ResourcePrice::default(),
             account_id,
             node_id: [0].to_vec(),
             farmer_account,
             user_account,
             accepted: false,
             workload_state: WorkloadState::Created,
+            expires_at: 0,
+            last_claimed: 0
         }
     }
 }
@@ -164,8 +199,8 @@ struct UserInfo {
 }
 
 #[serde(crate = "alt_serde")]
-#[derive(Deserialize, Encode, Decode, Default)]
-struct ResourcePrice {
+#[derive(PartialEq, Eq, PartialOrd, Ord, Deserialize, Clone, Encode, Decode, Default, RuntimeDebug)]
+pub struct ResourcePrice {
 	currency: u64,
     sru: u64,
     hru: u64,
@@ -195,7 +230,7 @@ impl fmt::Debug for NodeInfo {
 	}
 }
 
-pub trait Trait: system::Trait + CreateSignedTransaction<Call<Self>> {
+pub trait Trait: system::Trait + CreateSignedTransaction<Call<Self>> + timestamp::Trait {
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
     type Currency: Currency<Self::AccountId>;
     type RandomnessSource: Randomness<H256>;
@@ -246,7 +281,9 @@ decl_error! {
         NoLocalAcctForSignedTx,
         UnauthorizedFarmer,
         UnauthorizedUser,
-        UnauthorizedNode
+        UnauthorizedNode,
+        NotEnoughBalanceToClaim,
+        ClaimError,
     }
 }
 
@@ -302,7 +339,7 @@ decl_module! {
 
             ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
 
-            let contract = Contracts::<T>::get(reservation_id);
+            let mut contract = Contracts::<T>::get(reservation_id);
 
             // ensure!(contract.accepted == true, Error::<T>::ContractNotAccepted);
 
@@ -310,6 +347,33 @@ decl_module! {
             // Transfer currency to the contracts account
             T::Currency::transfer(&who, &contract.account_id, amount, AllowDeath)
                 .map_err(|_| DispatchError::Other("Can't make transfer"))?;
+
+
+            // Reevauluate contract expiration date
+            // check if the expiration date is set first in order to not confuse the user
+            if contract.expires_at > 0 {
+                let volume = VolumeReservations::get(reservation_id);
+    
+                let sru = volume.getRsu();
+    
+                let price_per_hour = Self::get_price_per_hour(&contract.resource_prices, sru);
+                let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(10e12) / U64F64::from_num(3600);
+    
+                // Get the contract's balance
+                let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
+                let balances_as_u128: u128 = balance.saturated_into::<u128>();
+    
+                let expires_at = (U128F0::from_num(balances_as_u128) / U128F0::from_num(price_per_sec)).to_num::<u64>();
+    
+                // Update expires at
+                // Calculate based on farmer prices
+                contract.expires_at = (contract.expires_at / 1000) + expires_at;
+                debug::info!("Reevauluating contract expiration, expires at: {:?}", &contract.expires_at);
+    
+                // Update the contract
+                Contracts::<T>::insert(&reservation_id, &contract);
+            }
+
             
             Self::deposit_event(RawEvent::ContractPaid(contract.account_id, reservation_id));
 
@@ -317,7 +381,7 @@ decl_module! {
         }
 
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn set_contract_price(origin, reservation_id: u64, cu_price: u64, su_price: u64, farmer_account: <T as frame_system::Trait>::AccountId) -> DispatchResult {
+        pub fn set_contract_price(origin, reservation_id: u64, resource_prices: ResourcePrice, farmer_account: <T as frame_system::Trait>::AccountId) -> DispatchResult {
             // TODO: Only off chain worker can sign this
             let _ = ensure_signed(origin)?;
 
@@ -325,8 +389,7 @@ decl_module! {
 
             let mut contract = Contracts::<T>::get(reservation_id);
 
-            contract.cu_price = cu_price;
-            contract.su_price = su_price;
+            contract.resource_prices = resource_prices;
             contract.farmer_account = farmer_account;
 
             // Update the contract
@@ -362,18 +425,44 @@ decl_module! {
             let who = ensure_signed(origin)?;
             ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
 
-            let contract = Contracts::<T>::get(reservation_id);
+            let mut contract = Contracts::<T>::get(reservation_id);
 
             // Ensure only the farmer of the contract can claim the funds
             ensure!(contract.farmer_account == who, Error::<T>::UnauthorizedFarmer);
 
             // Get the contract's balance
-            let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
+            let mut balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
+
+            // Evaluate if the farmer can claim funds, if yes, calculate how much
+            let volume = VolumeReservations::get(reservation_id);
+
+            let sru = volume.getRsu();
+
+            let price_per_hour = Self::get_price_per_hour(&contract.resource_prices, sru);
+            let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(10e12) / U64F64::from_num(3600);
+
+            let now = <timestamp::Module<T>>::get().saturated_into::<u64>();
+
+            // convert to seconds
+            let diff = (contract.last_claimed - now) / 1000;
+            ensure!(diff > 0, Error::<T>::ClaimError);
+
+            let amount_to_claim = (U64F64::from_num(diff) * price_per_sec).to_num::<u128>();
+            let balance_as_u128: u128 = balance.saturated_into::<u128>();
+            ensure!(amount_to_claim > balance_as_u128, Error::<T>::NotEnoughBalanceToClaim);
+
+            // TODO: MUST BE U128
+            balance = BalanceOf::<T>::from(amount_to_claim as u32);
 
             debug::info!("Transfering: {:?} from contract {:?} to farmer {:?}", &balance, &contract.account_id, &who);
             // Transfer currency to the farmers account
             T::Currency::transfer(&contract.account_id, &contract.farmer_account, balance, AllowDeath)
                 .map_err(|_| DispatchError::Other("Can't make transfer"))?;
+
+            contract.last_claimed = now;
+
+            // Update the contract
+            Contracts::<T>::insert(&reservation_id, &contract);
 
             Self::deposit_event(RawEvent::ContractFundsClaimed(reservation_id));
 
@@ -443,6 +532,28 @@ decl_module! {
 
             contract.workload_state = WorkloadState::Deployed;
 
+            let volume = VolumeReservations::get(reservation_id);
+
+            let sru = volume.getRsu();
+
+            let price_per_hour = Self::get_price_per_hour(&contract.resource_prices, sru);
+            let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(10e12) / U64F64::from_num(3600);
+
+            // Get the contract's balance
+            let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
+            let balances_as_u128: u128 = balance.saturated_into::<u128>();
+
+            let expires_at = (U128F0::from_num(balances_as_u128) / U128F0::from_num(price_per_sec)).to_num::<u64>();
+
+            // Update expires at
+            // Calculate based on farmer prices
+            let now = <timestamp::Module<T>>::get().saturated_into::<u64>();
+            let then = (now / 1000) + expires_at;
+            contract.expires_at = then;
+            // Set last claimed in order to know when to contract was deployed
+            contract.last_claimed = now;
+            debug::info!("expires at: {:?}", then);
+
             // Update the contract
             Contracts::<T>::insert(&reservation_id, &contract);
             
@@ -461,6 +572,16 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
+    fn get_price_per_hour(resource_prices: &ResourcePrice, rsu: RSU) -> I32F32 {
+        let cru = resource_prices.cru * rsu.cru;
+        let hru = I32F32::from_num(resource_prices.hru) * rsu.hru;
+        let sru = I32F32::from_num(resource_prices.sru) * rsu.sru;
+        let mru = I32F32::from_num(resource_prices.mru) * rsu.mru;
+
+        I32F32::from_num(cru) + hru + sru + mru
+    }
+
+
     fn offchain_signed_tx(block_number: T::BlockNumber) -> Result<(), Error<T>> {
         let mut reservation_id = ReservationID::get();
         if reservation_id > 0 {
@@ -492,11 +613,7 @@ impl<T: Trait> Module<T> {
         })?;
         
         reservation_id_storage.set(&reservation_id);
-        
-        // This is the on-chain function
-        let cru_price = farm.farm_info.resource_prices[0].cru;
-        let sru_price = farm.farm_info.resource_prices[0].sru;
-        debug::info!("Prices for farm: {:?}, cru price: {:?}, sru price: {:?}", farm.farm_info.id, cru_price, sru_price);
+
         debug::info!("Pubkey before parsing hex farm: {:?}, {:?}", farm.farm_info.id, farm.pubkey);
 
         let decoded = <[u8; 32]>::from_hex(farm.pubkey.clone()).expect("Decoding failed");
@@ -506,7 +623,7 @@ impl<T: Trait> Module<T> {
         let signer = Signer::<T, T::AuthorityId>::any_account();
 
         let result = signer.send_signed_transaction(|_acct|
-            Call::set_contract_price(reservation_id, cru_price, sru_price, T::AccountId::decode(&mut &farmer_address[..]).unwrap_or_default())
+            Call::set_contract_price(reservation_id, farm.farm_info.resource_prices[0].clone(), T::AccountId::decode(&mut &farmer_address[..]).unwrap_or_default())
         );
     
         // Display error if the signed tx fails.

@@ -6,14 +6,15 @@ async function getApiClient () {
     provider: wsProvider,
     types: {
       Contract: {
-        cu_price: 'u64',
-        su_price: 'u64',
+        resource_prices: 'ResourcePrice',
         account_id: 'AccountId',
         node_id: 'Vec<u8>',
         farmer_account: 'AccountId',
         user_account: 'AccountId',
         accepted: 'bool',
-        workload_state: 'WorkloadState'
+        workload_state: 'WorkloadState',
+        expires_at: 'u64',
+        last_claimed: 'u64'
       },
       VolumeType: {
         disk_type: 'u8',
@@ -26,6 +27,14 @@ async function getApiClient () {
       Public: '[u8;32]',
       WorkloadState: {
         _enum: ['Created', 'Deployed', 'Cancelled']
+      },
+      ResourcePrice: {
+        currency: 'u64',
+        sru: 'u64',
+        hru: 'u64',
+        cru: 'u64',
+        nru: 'u64',
+        mru: 'u64',
       }
     }
   })
