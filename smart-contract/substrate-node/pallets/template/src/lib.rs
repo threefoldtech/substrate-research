@@ -104,7 +104,7 @@ pub struct RSU {
 }
 
 impl VolumeType {
-    fn getRsu(&self) -> RSU {
+    fn get_rsu(&self) -> RSU {
         match self.disk_type {
             1 => {
                 RSU{
@@ -241,11 +241,11 @@ decl_storage! {
     trait Store for Module<T: Trait> as TemplateModule {
         pub ReservationState get(fn reservation_state): map hasher(blake2_128_concat) u64 => WorkloadState;
         pub ReservationsForAccount get(fn reservations_for_account): map hasher(blake2_128_concat) T::AccountId => Vec<u64>;
-        pub WorkloadCreated get(fn workloads_created): map hasher (blake2_128_concat) Vec<u8> => Vec<u64>;
-        pub WorkloadDeployed get(fn workloads_deployed): map hasher (blake2_128_concat) Vec<u8> => Vec<u64>;
         pub VolumeReservations get(fn volume_reservations): map hasher (blake2_128_concat) u64 => VolumeType;
         pub Contracts get(fn contracts): map hasher (blake2_128_concat) u64 => Contract<T>;
+        pub ContractPerExpiration get(fn contracts_per_expiration): map hasher (blake2_128_concat) u64 => Vec<u64>;
         ReservationID: u64;
+        LastBlockTime: u64;
     }
 }
 
@@ -273,6 +273,7 @@ decl_error! {
         ContractExists,
         ContractNotExists,
         ContractNotAccepted,
+        ContractNotDeployed,
         UnknownOffchainMux,
         HttpFetchingError,
         // Error returned when making signed transactions in off-chain worker
@@ -334,7 +335,7 @@ decl_module! {
         }
 
         #[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-        pub fn pay(origin, reservation_id: u64, #[compact] amount: BalanceOf<T>) -> DispatchResult {
+        pub fn pay(origin, reservation_id: u64, amount: BalanceOf<T>) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
             ensure!(Contracts::<T>::contains_key(&reservation_id), Error::<T>::ContractNotExists);
@@ -348,33 +349,46 @@ decl_module! {
             T::Currency::transfer(&who, &contract.account_id, amount, AllowDeath)
                 .map_err(|_| DispatchError::Other("Can't make transfer"))?;
 
-
             // Reevauluate contract expiration date
             // check if the expiration date is set first in order to not confuse the user
-            if contract.expires_at > 0 {
-                let volume = VolumeReservations::get(reservation_id);
-    
-                let sru = volume.getRsu();
-    
-                let price_per_hour = Self::get_price_per_hour(&contract.resource_prices, sru);
-                let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(10e12) / U64F64::from_num(3600);
-    
-                // Get the contract's balance
-                let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
-                let balances_as_u128: u128 = balance.saturated_into::<u128>();
-    
-                let expires_at = (U128F0::from_num(balances_as_u128) / U128F0::from_num(price_per_sec)).to_num::<u64>();
-    
-                // Update expires at
-                // Calculate based on farmer prices
-                contract.expires_at = (contract.expires_at / 1000) + expires_at;
-                debug::info!("Reevauluating contract expiration, expires at: {:?}", &contract.expires_at);
-    
-                // Update the contract
-                Contracts::<T>::insert(&reservation_id, &contract);
-            }
+            let volume = VolumeReservations::get(reservation_id);
 
+            let sru = volume.get_rsu();
+
+            let price_per_hour = Self::get_price_per_hour(&contract.resource_prices, sru);
+            let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(10e12) / U64F64::from_num(3600);
+
+            // Get the contract's balance
+            let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
+            let balances_as_u128: u128 = balance.saturated_into::<u128>();
+
+            let expires_at = (U128F0::from_num(balances_as_u128) / U128F0::from_num(price_per_sec)).to_num::<u64>();
+
+            // Update expires_at if there is an expiration date, this means the user is probably re-funding the contract
+            if contract.expires_at > 0 {
+                // Since the contract is expiration date will be updated we need to remove it from the list first
+                // in order to prevent it from getting cancelled before the new expiration date
+                ContractPerExpiration::mutate(&contract.expires_at, |list|  {
+                    debug::info!("list: {:?}", list);
+                    if list.len() > 0 {
+                        let index = list.iter().position(|x| x == &reservation_id).unwrap();
+                        list.remove(index);
+                    }
+                });
+                
+                contract.expires_at += expires_at;
+                debug::info!("Reevauluating contract expiration, expires at: {:?}", &contract.expires_at);
+            } else {
+                let now = <timestamp::Module<T>>::get().saturated_into::<u64>() / 1000;
+                contract.expires_at = now + expires_at;
+                debug::info!("Contract will expire at: {:?}", &contract.expires_at);
+            }
             
+            // Update the contract
+            Contracts::<T>::insert(&reservation_id, &contract);
+            // Insert the reservationID at contract expiration date
+            ContractPerExpiration::mutate(&contract.expires_at, |list|  list.push(reservation_id));
+
             Self::deposit_event(RawEvent::ContractPaid(contract.account_id, reservation_id));
 
             Ok(())
@@ -427,6 +441,8 @@ decl_module! {
 
             let mut contract = Contracts::<T>::get(reservation_id);
 
+            ensure!(contract.workload_state == WorkloadState::Deployed, Error::<T>::ContractNotDeployed);
+
             // Ensure only the farmer of the contract can claim the funds
             ensure!(contract.farmer_account == who, Error::<T>::UnauthorizedFarmer);
 
@@ -436,7 +452,7 @@ decl_module! {
             // Evaluate if the farmer can claim funds, if yes, calculate how much
             let volume = VolumeReservations::get(reservation_id);
 
-            let sru = volume.getRsu();
+            let sru = volume.get_rsu();
 
             let price_per_hour = Self::get_price_per_hour(&contract.resource_prices, sru);
             let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(10e12) / U64F64::from_num(3600);
@@ -444,15 +460,19 @@ decl_module! {
             let now = <timestamp::Module<T>>::get().saturated_into::<u64>();
 
             // convert to seconds
-            let diff = (contract.last_claimed - now) / 1000;
+            let diff = (now - contract.last_claimed) / 1000;
             ensure!(diff > 0, Error::<T>::ClaimError);
 
-            let amount_to_claim = (U64F64::from_num(diff) * price_per_sec).to_num::<u128>();
-            let balance_as_u128: u128 = balance.saturated_into::<u128>();
-            ensure!(amount_to_claim > balance_as_u128, Error::<T>::NotEnoughBalanceToClaim);
+            debug::info!("{:?} seconds have passed since last claimed, price per sec: {:?}", diff, price_per_sec);
 
-            // TODO: MUST BE U128
-            balance = BalanceOf::<T>::from(amount_to_claim as u32);
+            let amount_to_claim = (U64F64::from_num(diff) * price_per_sec).to_num::<u128>();
+            let balance_as_u128 = balance.saturated_into::<u128>();
+
+            debug::info!("Trying to claim {:?}, from contract with balance: {:?}", &amount_to_claim, &balance_as_u128);
+
+            if amount_to_claim <= balance_as_u128 {
+                balance = amount_to_claim.saturated_into();
+            }
 
             debug::info!("Transfering: {:?} from contract {:?} to farmer {:?}", &balance, &contract.account_id, &who);
             // Transfer currency to the farmers account
@@ -534,7 +554,7 @@ decl_module! {
 
             let volume = VolumeReservations::get(reservation_id);
 
-            let sru = volume.getRsu();
+            let sru = volume.get_rsu();
 
             let price_per_hour = Self::get_price_per_hour(&contract.resource_prices, sru);
             let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(10e12) / U64F64::from_num(3600);
@@ -567,11 +587,76 @@ decl_module! {
     
             let _ = Self::offchain_signed_tx(block_number);
         }
-    }
 
-}
+        fn on_finalize(b: T::BlockNumber) {
+            let block_number_as_u64: u64 = b.try_into().unwrap_or(0) as u64;
+            debug::info!("Entering on_finalize, block number: {:?}", block_number_as_u64);
+            let now = <timestamp::Module<T>>::get().saturated_into::<u64>() / 1000;
+            if block_number_as_u64 <= 1 {
+                LastBlockTime::put(now);
+                return
+            }
+
+            let last_block_time = LastBlockTime::get();
+            debug::info!("last block time: {:?}", last_block_time);
+
+            if last_block_time == 0 {
+                LastBlockTime::put(now);
+                return
+            }
+
+            for time in last_block_time..now {
+                // Get reservationID at a specific timestamp
+                let reservation_ids = ContractPerExpiration::get(time);
+                for reservation_id in reservation_ids {
+                    match Self::decomission_contract(reservation_id, time) {
+                        Ok(()) => {
+                            debug::info!("decomission of contract: {:?} success", reservation_id)
+                        }
+                        Err(err) => { debug::info!("error occured: {:?}", err); }
+                    }
+                }
+            }
+            
+            LastBlockTime::put(now);
+        }
+    }
+}   
 
 impl<T: Trait> Module<T> {
+    fn decomission_contract(reservation_id: u64, time: u64) -> Result<(), DispatchError> {
+        let mut contract = Contracts::<T>::get(reservation_id);
+        debug::info!("contract: {:?} for reservation ID {:?} found at time: {:?}", contract.account_id, reservation_id, time);
+
+        // Get the contract's balance
+        let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
+
+        debug::info!("Transfering {:?} from contract: {:?} to farmer: {:?}", &balance, &contract.account_id, &contract.farmer_account);
+        // Transfer currency to the users account
+        T::Currency::transfer(&contract.account_id, &contract.farmer_account, balance, AllowDeath).map_err(|err| {
+            debug::info!("{:?}", err); 
+            err
+        })?;
+
+        contract.workload_state = WorkloadState::Cancelled;
+
+        // Update the contract
+        Contracts::<T>::insert(&reservation_id, &contract);
+
+        ContractPerExpiration::mutate(&contract.expires_at, |list|  {
+            debug::info!("list: {:?}", list);
+            if list.len() > 0 {
+                let index = list.iter().position(|x| x == &reservation_id).unwrap();
+                list.remove(index);
+            }
+        });
+
+        Self::deposit_event(RawEvent::ContractCancelled(contract.node_id, reservation_id));
+
+        Ok(())
+    }
+
+
     fn get_price_per_hour(resource_prices: &ResourcePrice, rsu: RSU) -> I32F32 {
         let cru = resource_prices.cru * rsu.cru;
         let hru = I32F32::from_num(resource_prices.hru) * rsu.hru;
@@ -683,7 +768,7 @@ impl<T: Trait> Module<T> {
             debug::info!("{:?}", err); 
             <Error<T>>::HttpFetchingError
         })?;
-        debug::info!("{}", resp_str);
+        // debug::info!("{}", resp_str);
 
 		let node_farm_info: NodeInfo = serde_json::from_str(&resp_str).map_err(|err| {
             debug::info!("{:?}", err); 
@@ -707,7 +792,7 @@ impl<T: Trait> Module<T> {
             debug::info!("{:?}", err); 
             <Error<T>>::HttpFetchingError
         })?;
-        debug::info!("{}", resp_str);
+        // debug::info!("{}", resp_str);
     
         let farm_info: FarmInfo = serde_json::from_str(&resp_str).map_err(|err| {
             debug::info!("{:?}", err); 
@@ -729,7 +814,7 @@ impl<T: Trait> Module<T> {
             debug::info!("{:?}", err); 
             <Error<T>>::HttpFetchingError
         })?;
-        debug::info!("{}", resp_str);
+        // debug::info!("{}", resp_str);
     
         let user_info: UserInfo = serde_json::from_str(&resp_str).map_err(|err| {
             debug::info!("{:?}", err); 

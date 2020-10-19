@@ -30,7 +30,7 @@ async function getContract (id) {
 
   return {
     ...json,
-    balance: balance.free.toNumber(),
+    balance: (balance.free.toNumber() / 10e11).toFixed(2),
     volume: volume.toJSON()
   }
 }
@@ -40,8 +40,10 @@ async function payContract (id, amount, callback) {
   const keyring = new Keyring({ type: 'sr25519' })
   const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
 
+  const a = api.createType('BalanceOf', amount * 10e11)
+
   return api.tx.templateModule
-    .pay(id, amount)
+    .pay(id, a)
     .signAndSend(BOB, callback)
 }
 
