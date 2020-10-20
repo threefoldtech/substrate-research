@@ -1,6 +1,7 @@
 const { getApiClient } = require('./api')
 const { Keyring } = require('@polkadot/api')
 const bip39 = require('bip39')
+const BN = require('bn.js')
 
 async function createContract (nodeID, diskType, size, callback) {
   const api = await getApiClient()
@@ -30,7 +31,7 @@ async function getContract (id) {
 
   return {
     ...json,
-    balance: (balance.free.toNumber() / 10e11).toFixed(2),
+    balance: balance.free.toHuman(),
     volume: volume.toJSON()
   }
 }
@@ -40,7 +41,9 @@ async function payContract (id, amount, callback) {
   const keyring = new Keyring({ type: 'sr25519' })
   const BOB = keyring.addFromUri('//Bob', { name: 'Bob default' })
 
-  const a = api.createType('BalanceOf', amount * 10e11)
+  amount = new BN(amount)
+
+  const a = api.createType('BalanceOf', amount.mul(new BN(1e12)))
 
   return api.tx.templateModule
     .pay(id, a)

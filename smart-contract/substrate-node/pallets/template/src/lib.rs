@@ -356,7 +356,7 @@ decl_module! {
             let sru = volume.get_rsu();
 
             let price_per_hour = Self::get_price_per_hour(&contract.resource_prices, sru);
-            let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(10e12) / U64F64::from_num(3600);
+            let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(1e12) / U64F64::from_num(3600);
 
             // Get the contract's balance
             let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
@@ -455,7 +455,7 @@ decl_module! {
             let sru = volume.get_rsu();
 
             let price_per_hour = Self::get_price_per_hour(&contract.resource_prices, sru);
-            let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(10e12) / U64F64::from_num(3600);
+            let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(1e12) / U64F64::from_num(3600);
 
             let now = <timestamp::Module<T>>::get().saturated_into::<u64>();
 
@@ -557,7 +557,7 @@ decl_module! {
             let sru = volume.get_rsu();
 
             let price_per_hour = Self::get_price_per_hour(&contract.resource_prices, sru);
-            let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(10e12) / U64F64::from_num(3600);
+            let price_per_sec = U64F64::from_num(price_per_hour) * U64F64::from_num(1e12) / U64F64::from_num(3600);
 
             // Get the contract's balance
             let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);

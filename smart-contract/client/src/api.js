@@ -28,13 +28,14 @@ async function getApiClient () {
       WorkloadState: {
         _enum: ['Created', 'Deployed', 'Cancelled']
       },
+      RefCount: 'u32',
       ResourcePrice: {
         currency: 'u64',
         sru: 'u64',
         hru: 'u64',
         cru: 'u64',
         nru: 'u64',
-        mru: 'u64',
+        mru: 'u64'
       }
     }
   })
