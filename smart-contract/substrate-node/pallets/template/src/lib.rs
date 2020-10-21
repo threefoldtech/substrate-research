@@ -1,73 +1,67 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+use alt_serde::{Deserialize, Deserializer};
+use bs58;
+use codec::{Decode, Encode};
 /// Edit this file to define custom logic or remove it if it is not needed.
 /// Learn more about FRAME and the core library of Substrate FRAME pallets:
 /// https://substrate.dev/docs/en/knowledgebase/runtime/frame
-
 use core::{convert::TryInto, fmt};
-use codec::{Decode, Encode};
 use frame_support::{
-    decl_error, decl_event, decl_module, decl_storage, dispatch::{DispatchError, DispatchResult}, ensure, debug,
-    traits::{
-		Currency, Get, ExistenceRequirement::AllowDeath, Randomness
-    },
+    debug, decl_error, decl_event, decl_module, decl_storage,
+    dispatch::{DispatchError, DispatchResult},
+    ensure,
     sp_runtime::{
-        traits::AccountIdConversion, ModuleId, traits::SaturatedConversion,
         offchain as rt_offchain,
         offchain::{
             storage::StorageValueRef,
-            storage_lock::{StorageLock, BlockAndTime},
+            storage_lock::{BlockAndTime, StorageLock},
         },
-    }
+        traits::AccountIdConversion,
+        traits::SaturatedConversion,
+        ModuleId,
+    },
+    traits::{Currency, ExistenceRequirement::AllowDeath, Get, Randomness},
 };
 use frame_system::{
     self as system, ensure_signed,
-    offchain::{
-		AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer,
-	},
+    offchain::{AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer},
 };
-use sp_core::{RuntimeDebug, H256, ed25519};
-use sp_std::{
-	prelude::*, str
-};
-use alt_serde::{Deserialize, Deserializer};
 use hex::FromHex;
 use sp_core::crypto::KeyTypeId;
-use bs58;
+use sp_core::{ed25519, RuntimeDebug, H256};
+use sp_std::{prelude::*, str};
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
-use pallet_timestamp as timestamp;
 use fixed::{types::I32F32, types::U128F0, types::U64F64};
+use pallet_timestamp as timestamp;
 
 /// Based on the above `KeyTypeId` we need to generate a pallet-specific crypto type wrapper.
 /// We can utilize the supported crypto kinds (`sr25519`, `ed25519` and `ecdsa`) and augment
 /// them with the pallet-specific identifier.
 pub mod crypto {
-	use crate::KEY_TYPE;
-	use sp_core::sr25519::Signature as Sr25519Signature;
-	use sp_runtime::app_crypto::{app_crypto, sr25519};
-	use sp_runtime::{
-		traits::Verify,
-		MultiSignature, MultiSigner,
-    };
+    use crate::KEY_TYPE;
+    use sp_core::sr25519::Signature as Sr25519Signature;
+    use sp_runtime::app_crypto::{app_crypto, sr25519};
+    use sp_runtime::{traits::Verify, MultiSignature, MultiSigner};
 
-	app_crypto!(sr25519, KEY_TYPE);
+    app_crypto!(sr25519, KEY_TYPE);
 
-	pub struct TestAuthId;
-	// implemented for ocw-runtime
-	impl frame_system::offchain::AppCrypto<MultiSigner, MultiSignature> for TestAuthId {
-		type RuntimeAppPublic = Public;
-		type GenericSignature = sp_core::sr25519::Signature;
-		type GenericPublic = sp_core::sr25519::Public;
-	}
+    pub struct TestAuthId;
+    // implemented for ocw-runtime
+    impl frame_system::offchain::AppCrypto<MultiSigner, MultiSignature> for TestAuthId {
+        type RuntimeAppPublic = Public;
+        type GenericSignature = sp_core::sr25519::Signature;
+        type GenericPublic = sp_core::sr25519::Public;
+    }
 
-	// implemented for mock runtime in test
-	impl frame_system::offchain::AppCrypto<<Sr25519Signature as Verify>::Signer, Sr25519Signature>
-		for TestAuthId
-	{
-		type RuntimeAppPublic = Public;
-		type GenericSignature = sp_core::sr25519::Signature;
-		type GenericPublic = sp_core::sr25519::Public;
-	}
+    // implemented for mock runtime in test
+    impl frame_system::offchain::AppCrypto<<Sr25519Signature as Verify>::Signer, Sr25519Signature>
+        for TestAuthId
+    {
+        type RuntimeAppPublic = Public;
+        type GenericSignature = sp_core::sr25519::Signature;
+        type GenericPublic = sp_core::sr25519::Public;
+    }
 }
 
 #[cfg(test)]
@@ -86,7 +80,8 @@ impl Default for WorkloadState {
     }
 }
 
-pub type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
+pub type BalanceOf<T> =
+    <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 
 const PALLET_ID: ModuleId = ModuleId(*b"Charity!");
 
@@ -100,28 +95,24 @@ pub struct RSU {
     cru: u64,
     hru: I32F32,
     sru: I32F32,
-    mru: I32F32
+    mru: I32F32,
 }
 
 impl VolumeType {
     fn get_rsu(&self) -> RSU {
         match self.disk_type {
-            1 => {
-                RSU{
-                    hru: I32F32::from_num(self.size),
-                    sru: I32F32::from_num(0),
-                    mru: I32F32::from_num(0),
-                    cru: 0,
-                }
-            }
-            2 => {
-                RSU{
-                    hru: I32F32::from_num(0),
-                    sru: I32F32::from_num(self.size),
-                    mru: I32F32::from_num(0),
-                    cru: 0,
-                }
-            }
+            1 => RSU {
+                hru: I32F32::from_num(self.size),
+                sru: I32F32::from_num(0),
+                mru: I32F32::from_num(0),
+                cru: 0,
+            },
+            2 => RSU {
+                hru: I32F32::from_num(0),
+                sru: I32F32::from_num(self.size),
+                mru: I32F32::from_num(0),
+                cru: 0,
+            },
             _ => unreachable!(),
         }
     }
@@ -137,11 +128,12 @@ pub struct Contract<T: Trait> {
     accepted: bool,
     workload_state: WorkloadState,
     expires_at: u64,
-    last_claimed: u64
+    last_claimed: u64,
 }
 
 impl<T> Default for Contract<T>
-    where T: Trait
+where
+    T: Trait,
 {
     fn default() -> Contract<T> {
         let account_id = PALLET_ID.into_account();
@@ -157,7 +149,7 @@ impl<T> Default for Contract<T>
             accepted: false,
             workload_state: WorkloadState::Created,
             expires_at: 0,
-            last_claimed: 0
+            last_claimed: 0,
         }
     }
 }
@@ -172,10 +164,10 @@ pub const LOCK_BLOCK_EXPIRATION: u32 = 3; // in block number
 #[serde(crate = "alt_serde")]
 #[derive(Deserialize, Encode, Decode, Default)]
 struct NodeInfo {
-	// Specify our own deserializing function to convert JSON string to vector of bytes
-	#[serde(deserialize_with = "de_string_to_bytes")]
-	node_id: Vec<u8>,
-	farm_id: u64,
+    // Specify our own deserializing function to convert JSON string to vector of bytes
+    #[serde(deserialize_with = "de_string_to_bytes")]
+    node_id: Vec<u8>,
+    farm_id: u64,
 }
 
 #[serde(crate = "alt_serde")]
@@ -183,7 +175,7 @@ struct NodeInfo {
 struct FarmInfo {
     id: u64,
     threebot_id: u64,
-    resource_prices: Vec<ResourcePrice>
+    resource_prices: Vec<ResourcePrice>,
 }
 
 struct Farm {
@@ -195,39 +187,41 @@ struct Farm {
 #[derive(Deserialize, Encode, Decode, Default)]
 struct UserInfo {
     #[serde(deserialize_with = "de_string_to_bytes")]
-    pubkey: Vec<u8>
+    pubkey: Vec<u8>,
 }
 
 #[serde(crate = "alt_serde")]
-#[derive(PartialEq, Eq, PartialOrd, Ord, Deserialize, Clone, Encode, Decode, Default, RuntimeDebug)]
+#[derive(
+    PartialEq, Eq, PartialOrd, Ord, Deserialize, Clone, Encode, Decode, Default, RuntimeDebug,
+)]
 pub struct ResourcePrice {
-	currency: u64,
+    currency: u64,
     sru: u64,
     hru: u64,
     cru: u64,
     nru: u64,
-	mru: u64,
+    mru: u64,
 }
 
 pub fn de_string_to_bytes<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
 where
-	D: Deserializer<'de>,
+    D: Deserializer<'de>,
 {
-	let s: &str = Deserialize::deserialize(de)?;
-	Ok(s.as_bytes().to_vec())
+    let s: &str = Deserialize::deserialize(de)?;
+    Ok(s.as_bytes().to_vec())
 }
 
 impl fmt::Debug for NodeInfo {
-	// `fmt` converts the vector of bytes inside the struct back to string for
-	//   more friendly display.
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(
-			f,
-			"{{ node_id: {}, farm_id: {} }}",
-			str::from_utf8(&self.node_id).map_err(|_| fmt::Error)?,
-			self.farm_id,
-		)
-	}
+    // `fmt` converts the vector of bytes inside the struct back to string for
+    //   more friendly display.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{{ node_id: {}, farm_id: {} }}",
+            str::from_utf8(&self.node_id).map_err(|_| fmt::Error)?,
+            self.farm_id,
+        )
+    }
 }
 
 pub trait Trait: system::Trait + CreateSignedTransaction<Call<Self>> + timestamp::Trait {
@@ -253,7 +247,7 @@ decl_event!(
     pub enum Event<T>
     where
         AccountId = <T as frame_system::Trait>::AccountId,
-    {        
+    {
         // Will signal a contract has been added for a specific users, for a specific nodeID with a reservationID
         ContractAdded(AccountId, Vec<u8>, u64),
         ContractPaid(AccountId, u64),
@@ -277,7 +271,7 @@ decl_error! {
         UnknownOffchainMux,
         HttpFetchingError,
         // Error returned when making signed transactions in off-chain worker
-		NoLocalAcctForSigning,
+        NoLocalAcctForSigning,
         OffchainSignedTxError,
         NoLocalAcctForSignedTx,
         UnauthorizedFarmer,
@@ -311,8 +305,8 @@ decl_module! {
             // Create a new accountID based on the reservationID and assign it to the contract
             let account_id = PALLET_ID.into_sub_account(reservation_id);
             let _ = T::Currency::make_free_balance_be(
-				&account_id,
-				T::Currency::minimum_balance(),
+                &account_id,
+                T::Currency::minimum_balance(),
             );
             debug::info!("Assigned accountID: {:?} to contract with id: {:?}", account_id, reservation_id);
             contract.account_id = account_id;
@@ -375,7 +369,7 @@ decl_module! {
                         list.remove(index);
                     }
                 });
-                
+
                 contract.expires_at += expires_at;
                 debug::info!("Reevauluating contract expiration, expires at: {:?}", &contract.expires_at);
             } else {
@@ -383,7 +377,7 @@ decl_module! {
                 contract.expires_at = now + expires_at;
                 debug::info!("Contract will expire at: {:?}", &contract.expires_at);
             }
-            
+
             // Update the contract
             Contracts::<T>::insert(&reservation_id, &contract);
             // Insert the reservationID at contract expiration date
@@ -408,7 +402,7 @@ decl_module! {
 
             // Update the contract
             Contracts::<T>::insert(&reservation_id, &contract);
-            
+
             Self::deposit_event(RawEvent::ContractUpdated(contract.account_id, reservation_id));
 
             Ok(())
@@ -428,7 +422,7 @@ decl_module! {
 
             // Update the contract
             Contracts::<T>::insert(&reservation_id, &contract);
-            
+
             Self::deposit_event(RawEvent::ContractAccepted(contract.node_id, reservation_id));
 
             Ok(())
@@ -530,7 +524,7 @@ decl_module! {
 
             // Update the contract
             Contracts::<T>::insert(&reservation_id, &contract);
-            
+
             Self::deposit_event(RawEvent::ContractUpdated(contract.account_id, reservation_id));
 
             Ok(())
@@ -576,7 +570,7 @@ decl_module! {
 
             // Update the contract
             Contracts::<T>::insert(&reservation_id, &contract);
-            
+
             Self::deposit_event(RawEvent::ContractDeployed(contract.node_id, reservation_id));
 
             Ok(())
@@ -584,7 +578,7 @@ decl_module! {
 
         fn offchain_worker(block_number: T::BlockNumber) {
             debug::info!("Entering off-chain worker");
-    
+
             let _ = Self::offchain_signed_tx(block_number);
         }
 
@@ -617,24 +611,40 @@ decl_module! {
                     }
                 }
             }
-            
+
             LastBlockTime::put(now);
         }
     }
-}   
+}
 
 impl<T: Trait> Module<T> {
     fn decomission_contract(reservation_id: u64, time: u64) -> Result<(), DispatchError> {
         let mut contract = Contracts::<T>::get(reservation_id);
-        debug::info!("contract: {:?} for reservation ID {:?} found at time: {:?}", contract.account_id, reservation_id, time);
+        debug::info!(
+            "contract: {:?} for reservation ID {:?} found at time: {:?}",
+            contract.account_id,
+            reservation_id,
+            time
+        );
 
         // Get the contract's balance
         let balance: BalanceOf<T> = T::Currency::free_balance(&contract.account_id);
 
-        debug::info!("Transfering {:?} from contract: {:?} to farmer: {:?}", &balance, &contract.account_id, &contract.farmer_account);
+        debug::info!(
+            "Transfering {:?} from contract: {:?} to farmer: {:?}",
+            &balance,
+            &contract.account_id,
+            &contract.farmer_account
+        );
         // Transfer currency to the users account
-        T::Currency::transfer(&contract.account_id, &contract.farmer_account, balance, AllowDeath).map_err(|err| {
-            debug::info!("{:?}", err); 
+        T::Currency::transfer(
+            &contract.account_id,
+            &contract.farmer_account,
+            balance,
+            AllowDeath,
+        )
+        .map_err(|err| {
+            debug::info!("{:?}", err);
             err
         })?;
 
@@ -643,7 +653,7 @@ impl<T: Trait> Module<T> {
         // Update the contract
         Contracts::<T>::insert(&reservation_id, &contract);
 
-        ContractPerExpiration::mutate(&contract.expires_at, |list|  {
+        ContractPerExpiration::mutate(&contract.expires_at, |list| {
             debug::info!("list: {:?}", list);
             if list.len() > 0 {
                 let index = list.iter().position(|x| x == &reservation_id).unwrap();
@@ -651,11 +661,13 @@ impl<T: Trait> Module<T> {
             }
         });
 
-        Self::deposit_event(RawEvent::ContractCancelled(contract.node_id, reservation_id));
+        Self::deposit_event(RawEvent::ContractCancelled(
+            contract.node_id,
+            reservation_id,
+        ));
 
         Ok(())
     }
-
 
     fn get_price_per_hour(resource_prices: &ResourcePrice, rsu: RSU) -> I32F32 {
         let cru = resource_prices.cru * rsu.cru;
@@ -665,7 +677,6 @@ impl<T: Trait> Module<T> {
 
         I32F32::from_num(cru) + hru + sru + mru
     }
-
 
     fn offchain_signed_tx(block_number: T::BlockNumber) -> Result<(), Error<T>> {
         let mut reservation_id = ReservationID::get();
@@ -689,17 +700,24 @@ impl<T: Trait> Module<T> {
         debug::info!("Current reservation ID: {:?}", reservation_id);
 
         let contract = Contracts::<T>::get(reservation_id);
-        debug::info!("Contract with ID: {:?} and nodeID: {:?}", reservation_id, contract.node_id);
+        debug::info!(
+            "Contract with ID: {:?} and nodeID: {:?}",
+            reservation_id,
+            contract.node_id
+        );
 
-        
         let farm = Self::fetch_farmer_prices(contract.node_id).map_err(|err| {
-            debug::info!("{:?}", err); 
+            debug::info!("{:?}", err);
             err
         })?;
-        
+
         reservation_id_storage.set(&reservation_id);
 
-        debug::info!("Pubkey before parsing hex farm: {:?}, {:?}", farm.farm_info.id, farm.pubkey);
+        debug::info!(
+            "Pubkey before parsing hex farm: {:?}, {:?}",
+            farm.farm_info.id,
+            farm.pubkey
+        );
 
         let decoded = <[u8; 32]>::from_hex(farm.pubkey.clone()).expect("Decoding failed");
         let farmer_address = ed25519::Public::from_raw(decoded);
@@ -707,10 +725,14 @@ impl<T: Trait> Module<T> {
         // retrieve contract account
         let signer = Signer::<T, T::AuthorityId>::any_account();
 
-        let result = signer.send_signed_transaction(|_acct|
-            Call::set_contract_price(reservation_id, farm.farm_info.resource_prices[0].clone(), T::AccountId::decode(&mut &farmer_address[..]).unwrap_or_default())
-        );
-    
+        let result = signer.send_signed_transaction(|_acct| {
+            Call::set_contract_price(
+                reservation_id,
+                farm.farm_info.resource_prices[0].clone(),
+                T::AccountId::decode(&mut &farmer_address[..]).unwrap_or_default(),
+            )
+        });
+
         // Display error if the signed tx fails.
         if let Some((acc, res)) = result {
             if res.is_err() {
@@ -722,62 +744,63 @@ impl<T: Trait> Module<T> {
         }
         // The case of `None`: no account is available for sending
         debug::error!("No local account available");
-        return Err(<Error<T>>::NoLocalAcctForSignedTx)
+        return Err(<Error<T>>::NoLocalAcctForSignedTx);
     }
 
-	fn fetch_farmer_prices(node_id: Vec<u8>) -> Result<Farm, Error<T>> {
-		let mut lock = StorageLock::<BlockAndTime<Self>>::with_block_and_time_deadline(
-			b"offchain-explorer::lock", LOCK_BLOCK_EXPIRATION,
-			rt_offchain::Duration::from_millis(LOCK_TIMEOUT_EXPIRATION)
-		);
-        
+    fn fetch_farmer_prices(node_id: Vec<u8>) -> Result<Farm, Error<T>> {
+        let mut lock = StorageLock::<BlockAndTime<Self>>::with_block_and_time_deadline(
+            b"offchain-explorer::lock",
+            LOCK_BLOCK_EXPIRATION,
+            rt_offchain::Duration::from_millis(LOCK_TIMEOUT_EXPIRATION),
+        );
+
         if let Ok(_guard) = lock.try_lock() {
-			match Self::fetch_n_parse_node(node_id) {
-				Ok(node_info) => {
-                    match Self::fetch_n_parse_farm(node_info.farm_id) {
-                        Ok(farm_info) => {
-                            match Self::fetch_n_parse_user(farm_info.threebot_id) {
-                                Ok(user_info) => {
-                                    let farm = Farm {
-                                        farm_info,
-                                        pubkey: user_info.pubkey
-                                    };
-                                    return Ok(farm)
-                                }
-                                Err(err) => { return Err(err); }
-                            }
+            match Self::fetch_n_parse_node(node_id) {
+                Ok(node_info) => match Self::fetch_n_parse_farm(node_info.farm_id) {
+                    Ok(farm_info) => match Self::fetch_n_parse_user(farm_info.threebot_id) {
+                        Ok(user_info) => {
+                            let farm = Farm {
+                                farm_info,
+                                pubkey: user_info.pubkey,
+                            };
+                            return Ok(farm);
                         }
-                        Err(err) => { return Err(err); }
+                        Err(err) => {
+                            return Err(err);
+                        }
+                    },
+                    Err(err) => {
+                        return Err(err);
                     }
+                },
+                Err(err) => {
+                    return Err(err);
                 }
-				Err(err) => { return Err(err); }
             };
         }
-        return Err(<Error<T>>::HttpFetchingError)
+        return Err(<Error<T>>::HttpFetchingError);
     }
-    
 
-	fn fetch_n_parse_node(node_id: Vec<u8>) -> Result<NodeInfo, Error<T>> {
+    fn fetch_n_parse_node(node_id: Vec<u8>) -> Result<NodeInfo, Error<T>> {
         debug::info!("fetching node");
-		let resp_bytes = Self::fetch_node_from_remote(node_id).map_err(|e| {
-			debug::error!("fetch_node_from_remote error: {:?}", e);
-			<Error<T>>::HttpFetchingError
+        let resp_bytes = Self::fetch_node_from_remote(node_id).map_err(|e| {
+            debug::error!("fetch_node_from_remote error: {:?}", e);
+            <Error<T>>::HttpFetchingError
         })?;
 
-		let resp_str = str::from_utf8(&resp_bytes).map_err(|err| {
-            debug::info!("{:?}", err); 
+        let resp_str = str::from_utf8(&resp_bytes).map_err(|err| {
+            debug::info!("{:?}", err);
             <Error<T>>::HttpFetchingError
         })?;
         // debug::info!("{}", resp_str);
 
-		let node_farm_info: NodeInfo = serde_json::from_str(&resp_str).map_err(|err| {
-            debug::info!("{:?}", err); 
+        let node_farm_info: NodeInfo = serde_json::from_str(&resp_str).map_err(|err| {
+            debug::info!("{:?}", err);
             <Error<T>>::HttpFetchingError
         })?;
 
         debug::info!("got node response");
         Ok(node_farm_info)
-
     }
 
     fn fetch_n_parse_farm(farm_id: u64) -> Result<FarmInfo, Error<T>> {
@@ -787,19 +810,19 @@ impl<T: Trait> Module<T> {
             debug::error!("fetch_node_from_remote error: {:?}", e);
             <Error<T>>::HttpFetchingError
         })?;
-    
+
         let resp_str = str::from_utf8(&resp_bytes).map_err(|err| {
-            debug::info!("{:?}", err); 
+            debug::info!("{:?}", err);
             <Error<T>>::HttpFetchingError
         })?;
         // debug::info!("{}", resp_str);
-    
+
         let farm_info: FarmInfo = serde_json::from_str(&resp_str).map_err(|err| {
-            debug::info!("{:?}", err); 
+            debug::info!("{:?}", err);
             <Error<T>>::HttpFetchingError
         })?;
         debug::info!("got farm response");
-    
+
         Ok(farm_info)
     }
 
@@ -809,87 +832,87 @@ impl<T: Trait> Module<T> {
             debug::error!("fetch_node_from_remote error: {:?}", e);
             <Error<T>>::HttpFetchingError
         })?;
-    
+
         let resp_str = str::from_utf8(&resp_bytes).map_err(|err| {
-            debug::info!("{:?}", err); 
+            debug::info!("{:?}", err);
             <Error<T>>::HttpFetchingError
         })?;
         // debug::info!("{}", resp_str);
-    
+
         let user_info: UserInfo = serde_json::from_str(&resp_str).map_err(|err| {
-            debug::info!("{:?}", err); 
+            debug::info!("{:?}", err);
             <Error<T>>::HttpFetchingError
         })?;
         debug::info!("got farm response");
-    
+
         Ok(user_info)
     }
-    
+
     /// This function uses the `offchain::http` API to query the remote github information,
-	///   and returns the JSON response as vector of bytes.
-	fn fetch_node_from_remote(node_id: Vec<u8>) -> Result<Vec<u8>, Error<T>> {        
+    ///   and returns the JSON response as vector of bytes.
+    fn fetch_node_from_remote(node_id: Vec<u8>) -> Result<Vec<u8>, Error<T>> {
         let mut h = EXPLORER_NODES.as_bytes().to_vec();
         h.extend_from_slice(&node_id);
-    
+
         let p = str::from_utf8(&h).unwrap();
 
         debug::info!("sending request to: {:?}", p);
 
-		let request = rt_offchain::http::Request::get(&p);
+        let request = rt_offchain::http::Request::get(&p);
 
-		let timeout = sp_io::offchain::timestamp()
-			.add(rt_offchain::Duration::from_millis(FETCH_TIMEOUT_PERIOD));
+        let timeout = sp_io::offchain::timestamp()
+            .add(rt_offchain::Duration::from_millis(FETCH_TIMEOUT_PERIOD));
 
-		let pending = request
-			.deadline(timeout) // Setting the timeout time
-			.send() // Sending the request out by the host
-			.map_err(|_| <Error<T>>::HttpFetchingError)?;
+        let pending = request
+            .deadline(timeout) // Setting the timeout time
+            .send() // Sending the request out by the host
+            .map_err(|_| <Error<T>>::HttpFetchingError)?;
 
-		let response = pending
-			.try_wait(timeout)
-			.map_err(|_| <Error<T>>::HttpFetchingError)?
-			.map_err(|_| <Error<T>>::HttpFetchingError)?;
+        let response = pending
+            .try_wait(timeout)
+            .map_err(|_| <Error<T>>::HttpFetchingError)?
+            .map_err(|_| <Error<T>>::HttpFetchingError)?;
 
-		if response.code != 200 {
-			debug::error!("Unexpected http request status code: {}", response.code);
-			return Err(<Error<T>>::HttpFetchingError);
-		}
+        if response.code != 200 {
+            debug::error!("Unexpected http request status code: {}", response.code);
+            return Err(<Error<T>>::HttpFetchingError);
+        }
 
-		Ok(response.body().collect::<Vec<u8>>())
+        Ok(response.body().collect::<Vec<u8>>())
     }
 
-	fn fetch_farm_from_remote(farm_id: u64) -> Result<Vec<u8>, Error<T>> {        
+    fn fetch_farm_from_remote(farm_id: u64) -> Result<Vec<u8>, Error<T>> {
         let mut h = EXPLORER_FARMS.as_bytes().to_vec();
         h.extend_from_slice(&Self::to_str_bytes(farm_id));
-    
+
         let p = str::from_utf8(&h).unwrap();
 
         debug::info!("sending request to: {:?}", p);
 
-		let request = rt_offchain::http::Request::get(&p);
+        let request = rt_offchain::http::Request::get(&p);
 
-		let timeout = sp_io::offchain::timestamp()
-			.add(rt_offchain::Duration::from_millis(FETCH_TIMEOUT_PERIOD));
+        let timeout = sp_io::offchain::timestamp()
+            .add(rt_offchain::Duration::from_millis(FETCH_TIMEOUT_PERIOD));
 
-		let pending = request
-			.deadline(timeout) // Setting the timeout time
-			.send() // Sending the request out by the host
-			.map_err(|_| <Error<T>>::HttpFetchingError)?;
+        let pending = request
+            .deadline(timeout) // Setting the timeout time
+            .send() // Sending the request out by the host
+            .map_err(|_| <Error<T>>::HttpFetchingError)?;
 
-		let response = pending
-			.try_wait(timeout)
-			.map_err(|_| <Error<T>>::HttpFetchingError)?
-			.map_err(|_| <Error<T>>::HttpFetchingError)?;
+        let response = pending
+            .try_wait(timeout)
+            .map_err(|_| <Error<T>>::HttpFetchingError)?
+            .map_err(|_| <Error<T>>::HttpFetchingError)?;
 
-		if response.code != 200 {
-			debug::error!("Unexpected http request status code: {}", response.code);
-			return Err(<Error<T>>::HttpFetchingError);
-		}
+        if response.code != 200 {
+            debug::error!("Unexpected http request status code: {}", response.code);
+            return Err(<Error<T>>::HttpFetchingError);
+        }
 
-		Ok(response.body().collect::<Vec<u8>>())
+        Ok(response.body().collect::<Vec<u8>>())
     }
 
-    fn fetch_user_from_remote(threebot_id: u64) -> Result<Vec<u8>, Error<T>> {        
+    fn fetch_user_from_remote(threebot_id: u64) -> Result<Vec<u8>, Error<T>> {
         let mut h = EXPLORER_USERS.as_bytes().to_vec();
         h.extend_from_slice(&Self::to_str_bytes(threebot_id));
 
@@ -897,61 +920,50 @@ impl<T: Trait> Module<T> {
 
         debug::info!("sending request to: {:?}", p);
 
-		let request = rt_offchain::http::Request::get(&p);
+        let request = rt_offchain::http::Request::get(&p);
 
-		let timeout = sp_io::offchain::timestamp()
-			.add(rt_offchain::Duration::from_millis(FETCH_TIMEOUT_PERIOD));
+        let timeout = sp_io::offchain::timestamp()
+            .add(rt_offchain::Duration::from_millis(FETCH_TIMEOUT_PERIOD));
 
-		let pending = request
-			.deadline(timeout) // Setting the timeout time
-			.send() // Sending the request out by the host
-			.map_err(|_| <Error<T>>::HttpFetchingError)?;
+        let pending = request
+            .deadline(timeout) // Setting the timeout time
+            .send() // Sending the request out by the host
+            .map_err(|_| <Error<T>>::HttpFetchingError)?;
 
-		let response = pending
-			.try_wait(timeout)
-			.map_err(|_| <Error<T>>::HttpFetchingError)?
-			.map_err(|_| <Error<T>>::HttpFetchingError)?;
+        let response = pending
+            .try_wait(timeout)
+            .map_err(|_| <Error<T>>::HttpFetchingError)?
+            .map_err(|_| <Error<T>>::HttpFetchingError)?;
 
-		if response.code != 200 {
-			debug::error!("Unexpected http request status code: {}", response.code);
-			return Err(<Error<T>>::HttpFetchingError);
-		}
+        if response.code != 200 {
+            debug::error!("Unexpected http request status code: {}", response.code);
+            return Err(<Error<T>>::HttpFetchingError);
+        }
 
-		Ok(response.body().collect::<Vec<u8>>())
+        Ok(response.body().collect::<Vec<u8>>())
     }
-    
+
     fn to_str_bytes(mut number: u64) -> Vec<u8> {
         let mut out = Vec::new();
-    
+
         let mut l = true;
-    
+
         while l {
             l = number > 9;
             let last_digit = number % 10;
-            match last_digit {
-                0 => out.extend_from_slice("0".as_bytes()),
-                1 => out.extend_from_slice("1".as_bytes()),
-                2 => out.extend_from_slice("2".as_bytes()),
-                3 => out.extend_from_slice("3".as_bytes()),
-                4 => out.extend_from_slice("4".as_bytes()),
-                5 => out.extend_from_slice("5".as_bytes()),
-                6 => out.extend_from_slice("6".as_bytes()),
-                7 => out.extend_from_slice("7".as_bytes()),
-                8 => out.extend_from_slice("8".as_bytes()),
-                9 => out.extend_from_slice("9".as_bytes()),
-                _ => unreachable!(),
-            }
+            // 48 is the utf-8 value for the 0 char, digits are in ascending sequence
+            out.extend_from_slice(&[48 + last_digit as u8]);
             number /= 10;
         }
-    
+
         out.reverse();
         out
     }
 }
 
 impl<T: Trait> rt_offchain::storage_lock::BlockNumberProvider for Module<T> {
-	type BlockNumber = T::BlockNumber;
-	fn current_block_number() -> Self::BlockNumber {
-	  <frame_system::Module<T>>::block_number()
+    type BlockNumber = T::BlockNumber;
+    fn current_block_number() -> Self::BlockNumber {
+        <frame_system::Module<T>>::block_number()
     }
 }
