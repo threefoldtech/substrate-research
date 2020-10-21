@@ -1,0 +1,26 @@
+@startuml
+actor Customer
+database Substrate
+control OffchainWorker
+database Explorer
+actor Farmer
+entity Node
+
+Customer -> Substrate: Initial contract creation
+OffchainWorker --> Substrate: Pick up contract creation
+OffchainWorker --> Explorer: Look up farm prices and farmer pubkey
+OffchainWorker --> Substrate: Add farmer pubkey and resource price in contract
+Farmer -> Substrate: Sign contract for approval
+Customer -> Substrate: Make first deposit on contract
+Node --> Substrate: Picks up the contract is signed and funded
+Node --> Node: Deploy workload
+Node --> Substrate: Set the workload as deployed
+Farmer -> Substrate: Periodically claim funds
+Customer -> Substrate: Add funds to contract as needed to keep workload alive
+Customer -> Substrate: Mark contract as finished
+Substrate --> Substrate: Pay out remaining due balance to farmer
+Substrate --> Substrate: Refund remainder to customer
+Node --> Substrate: Notice contract is finished
+Node --> Node: Clean up workload
+
+@enduml
