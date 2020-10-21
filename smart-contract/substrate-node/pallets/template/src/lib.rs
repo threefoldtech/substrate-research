@@ -883,7 +883,7 @@ impl<T: Trait> Module<T> {
 
     fn fetch_farm_from_remote(farm_id: u64) -> Result<Vec<u8>, Error<T>> {
         let mut h = EXPLORER_FARMS.as_bytes().to_vec();
-        h.extend_from_slice(&Self::to_str_bytes(farm_id));
+        h.extend_from_slice(&to_str_bytes(farm_id));
 
         let p = str::from_utf8(&h).unwrap();
 
@@ -914,7 +914,7 @@ impl<T: Trait> Module<T> {
 
     fn fetch_user_from_remote(threebot_id: u64) -> Result<Vec<u8>, Error<T>> {
         let mut h = EXPLORER_USERS.as_bytes().to_vec();
-        h.extend_from_slice(&Self::to_str_bytes(threebot_id));
+        h.extend_from_slice(&to_str_bytes(threebot_id));
 
         let p = str::from_utf8(&h).unwrap();
 
@@ -942,28 +942,45 @@ impl<T: Trait> Module<T> {
 
         Ok(response.body().collect::<Vec<u8>>())
     }
+}
 
-    fn to_str_bytes(mut number: u64) -> Vec<u8> {
-        let mut out = Vec::new();
+fn to_str_bytes(mut number: u64) -> Vec<u8> {
+    let mut out = Vec::new();
 
-        let mut l = true;
+    let mut l = true;
 
-        while l {
-            l = number > 9;
-            let last_digit = number % 10;
-            // 48 is the utf-8 value for the 0 char, digits are in ascending sequence
-            out.extend_from_slice(&[48 + last_digit as u8]);
-            number /= 10;
-        }
-
-        out.reverse();
-        out
+    while l {
+        l = number > 9;
+        let last_digit = number % 10;
+        // 48 is the utf-8 value for the 0 char, digits are in ascending sequence
+        out.extend_from_slice(&[48 + last_digit as u8]);
+        number /= 10;
     }
+
+    out.reverse();
+    out
 }
 
 impl<T: Trait> rt_offchain::storage_lock::BlockNumberProvider for Module<T> {
     type BlockNumber = T::BlockNumber;
     fn current_block_number() -> Self::BlockNumber {
         <frame_system::Module<T>>::block_number()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_str_bytes;
+    use sp_std::str;
+
+    #[test]
+    fn number_to_str_bytes() {
+        let case1 = (3242, "3242");
+        let case2 = (002342, "2342");
+        let case3 = (1234567890, "1234567890");
+
+        assert_eq!(case1.1, str::from_utf8(&to_str_bytes(case1.0)).unwrap());
+        assert_eq!(case2.1, str::from_utf8(&to_str_bytes(case2.0)).unwrap());
+        assert_eq!(case3.1, str::from_utf8(&to_str_bytes(case3.0)).unwrap());
     }
 }
